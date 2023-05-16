@@ -6,16 +6,37 @@ import skimage as sk
 
 def __init__():
 	global image_file, image_obj
-	image_file = "images/image4.jpg"
+	image_file = "images/image1.jpg"
 	image_obj = sk.io.imread(image_file)
 	histogram()
 
-
 def histogram():
 	global image_obj
-	hist,bin_edges = np.histogram(image_obj,bins=256,range=(0,256))
-	mp.plot(hist)
-	mp.show()
+	def plot_img_and_hist(image, axes, bins=256):
+		ax_img, ax_hist = axes
+		ax_cdf = ax_hist.twinx()
+
+		# Display image
+		ax_img.imshow(image, cmap=mp.cm.gray)
+		ax_img.set_axis_off()
+
+		# Display histogram
+		ax_hist.hist(image.ravel(), bins=bins)
+		ax_hist.ticklabel_format(axis='y', style='scientific', scilimits=(0, 0))
+		ax_hist.set_xlabel('Pixel intensity')
+
+		xmin, xmax = sk.util.dtype.dtype_range[image.dtype.type]
+		ax_hist.set_xlim(xmin, xmax)
+
+		# Display cumulative distribution
+		img_cdf, bins = sk.exposure.cumulative_distribution(image, bins)
+		ax_cdf.plot(bins, img_cdf, 'r')
+
+		return ax_img, ax_hist, ax_cdf
+
+	# prevent overlap of y-axis labels
+	strip_detection()
+
 
 def corner_detection():
 	global image_obj
@@ -33,7 +54,7 @@ def corner_detection():
 def edge_detection():
 	global image_obj
 
-	edges1 = sk.feature.canny(image_obj)
+	edges1 = sk.filters.sobel(image_obj)
 	edges2 = sk.feature.canny(image_obj, sigma=3)
 
 	# display results
@@ -59,12 +80,11 @@ def strip_detection():
 	strips = []
 
 	threshold = sk.filters.threshold_otsu(image_obj)
-	color_corrected_image = sk.morphology.closing(image_obj > threshold, sk.morphology.square(3))
+
+	color_corrected_image = sk.morphology.closing(image_obj > threshold / 1.5, sk.morphology.square(3))
 	cleared = sk.segmentation.clear_border(color_corrected_image)
-
+	
 	label_image = sk.measure.label(cleared)
-
-	sk.io.imshow(label_image)
 
 	# to make the background transparent, pass the value of `bg_label`,
 	# and leave `bg_color` as `None` and `kind` as `overlay`
@@ -75,7 +95,7 @@ def strip_detection():
 
 	for region in sk.measure.regionprops(label_image):
 		# take regions with large enough areas
-		if region.area >= 10:
+		if region.area >= 8:
 			# draw rectangle around segmented coins
 			minr, minc, maxr, maxc = region.bbox
 			rect = patches.Rectangle((minc, minr), maxc - minc, maxr - minr,
