@@ -19,23 +19,24 @@ def detect_lateral_flow_tests(image, line_length = 10):
     threshold = filters.threshold_otsu(image)
     threshold_image = image > threshold
 
-    # Create eroded and dilated versions
-    eroded = morphology.binary_erosion(threshold_image, morphology.rectangle(line_length, 1))
-    dilated = morphology.binary_dilation(eroded, morphology.rectangle(line_length, 1))
-
-    edges = sk.feature.canny(image)
-
+    edges = sk.feature.canny(threshold_image)
+    
     # Perform Hough line detection
     h, theta, d = sk.transform.hough_line(edges)
 
     # Find the most prominent lines
     _, angles, dists = sk.transform.hough_line_peaks(h, theta, d)
 
+    # Create eroded and dilated versions
+    eroded = morphology.binary_erosion(threshold_image, morphology.rectangle(line_length, 1))
+    dilated = morphology.binary_dilation(eroded, morphology.rectangle(line_length, 1))
+
     plt.imshow(dilated)
     # Label connected components in the binary mask
     labeled = label(dilated)
     background_color = np.mean(labeled[0:1, 0:1], axis=(0, 1))
     # Analyze each labeled region
+    copy_image = np.copy(image)
     for region in regionprops(labeled):
         # Get the bounding box coordinates of the region
         minr, minc, maxr, maxc = region.bbox
@@ -47,23 +48,27 @@ def detect_lateral_flow_tests(image, line_length = 10):
         if mean_color > background_color and region.area >= 100:
             # Draw a rectangle around the detected test
             if check_duplicate(minr, minc, maxr, maxc):
-                straighten_region(region, angles)
+                straighten_region(copy_image, region, angles)
                 test_strips.append(region)    
-    plt.show()
+    image = copy_image
 
-def straighten_region(region, angles):
+def straighten_region(copy_image, region, angles):
     minr, minc, maxr, maxc = region.bbox
     maxr, maxc = max(maxr, minr + min_maxr), max(maxc, minc + min_maxc)
 
+    # Calculate the center of the region
+    center_row = (maxr + minr) // 2
+    center_col = (maxc + minc) // 2
+
+    # Calculate the average angle for the region
     region_angles = np.rad2deg(angles)
     region_angle = np.mean(region_angles)
 
     # Rotate the region to straighten it
-    region_image = image[minr:maxr, minc:maxc]
-    rotated_region = sk.transform.rotate(region_image, region_angle)
+    rotated_region =sk.transform.rotate(image[minr:maxr, minc:maxc], region_angle, center=(center_row - minr, center_col - minc))
 
-    # Replace the rotated region in the original image
-    image[minr:maxr, minc:maxc] = rotated_region    
+    # Replace the rotated region in the copy of the original image
+    copy_image[minr:maxr, minc:maxc] = rotated_region
 
 def check_duplicate(minr, minc, maxr, maxc) -> bool:
     # Iterate through tests that have already been identified
@@ -77,17 +82,13 @@ def check_duplicate(minr, minc, maxr, maxc) -> bool:
 
 def draw_rectangle(minr, minc, maxr, maxc):
     # Create a rectangle patch
-    maxr, maxc = max(maxr, minr + min_maxr), max(maxc, minc + min_maxc)
-    # coordinates = [(minr, minc), (minr, maxc), (maxr, minc), (maxr, maxc)]
-    # x_coords, y_coords = zip(*coordinates)
-    # plt.plot(x_coords, y_coords, 'b-')  # Plot the points and connect them with lines
-    # plt.gca().set_aspect('equal')  # Set aspect ratio to equal (if needed)
+    maxr, maxc = min(max(maxr, minr + min_maxr), len(image)), min(max(maxc, minc + min_maxc), len(image[0]))
     rect = patches.Rectangle((minc, minr), maxc - minc, maxr - minr, linewidth=2, edgecolor='r', facecolor='none')
     # Add the rectangle to the current plot
     plt.gca().add_patch(rect)
 
 
-image_path = 'images/image2.jpeg'
+image_path = 'images/image3.jpg'
 image = io.imread(image_path, as_gray=True)
 width = len(image[0])
 min_maxc = (int)(width / 40)
