@@ -9,6 +9,8 @@ import matplotlib.patches as patches
 
 global image_obj
 global min_maxr, min_maxc
+global angle_threshold
+global region_num
 
 def detect_lateral_flow_tests(image, lst, line_length = 10):
     # Increase gammma of the image
@@ -17,9 +19,8 @@ def detect_lateral_flow_tests(image, lst, line_length = 10):
     # Create a binary mask based on color thresholding
     threshold = filters.threshold_otsu(image)
     threshold_image = image > threshold
-
     edges = sk.feature.canny(threshold_image)
-    
+
     # Perform Hough line detection
     h, theta, d = sk.transform.hough_line(edges)
 
@@ -50,7 +51,7 @@ def detect_lateral_flow_tests(image, lst, line_length = 10):
             # Draw a rectangle around the detected test
             if check_duplicate(minr, minc, maxr, maxc, lst):
                 straighten_region(copy_image, region, angles)
-                lst.append(region)    
+                lst.append(region)
     image = copy_image
 
 def straighten_region(copy_image, region, angles):
@@ -65,11 +66,13 @@ def straighten_region(copy_image, region, angles):
     region_angles = np.rad2deg(angles)
     region_angle = np.mean(region_angles)
 
-    # Rotate the region to straighten it
-    rotated_region = sk.transform.rotate(copy_image[minr:maxr, minc:maxc], region_angle, center=(center_row - minr, center_col - minc))
+    # Check if the angle is greater than a threshold	
+    if region_angle > angle_threshold:	
+        # Rotate the region by the opposite angle	
+        rotated_region = sk.transform.rotate(copy_image[minr:maxr, minc:maxc], -region_angle, center=(center_row - minr, center_col - minc))	
+        # Replace the rotated region in the copy of the original image	
+        copy_image[minr:maxr, minc:maxc] = rotated_region
 
-    # Replace the rotated region in the copy of the original image
-    copy_image[minr:maxr, minc:maxc] = rotated_region
 
 def check_duplicate(minr, minc, maxr, maxc, lst) -> bool:
     # Iterate through tests that have already been identified
@@ -86,13 +89,42 @@ def draw_rectangle(minr, minc, maxr, maxc):
     rect = patches.Rectangle((minc, minr), maxc - minc, maxr - minr, linewidth=2, edgecolor='r', facecolor='none')
     # Add the rectangle to the current plot
     plt.gca().add_patch(rect)
+    
+def remove_outliers(lst):
+    min_width = float('inf')
+    new_lst = []
+    for region in lst:
+        cur_minr, cur_minc, cur_maxr, cur_maxc = region.bbox
+        cur_maxc = max(cur_maxc, cur_minc + min_maxc)
+        width = cur_maxc - cur_minc
+        if width < min_width:
+            min_width = width
+    for region in lst:
+        cur_minr, cur_minc, cur_maxr, cur_maxc = region.bbox
+        cur_maxc = max(cur_maxc, cur_minc + min_maxc)
+        width = cur_maxc - cur_minc
+        if width <= (min_width * 2):
+            new_lst.append(region)
+    return new_lst
 
+def detect_lines(image):
 
+    # Apply a threshold to identify regions of interest
+    edges = sk.feature.canny(image)
+
+    # Label connected regions in the binary image
+    labeled_image = sk.measure.label(edges)
+    plt.imshow(labeled_image)
+    plt.show()
+
+angle_threshold = 10
 folder_path = 'images'
+region_num = 0
 # Iterate through images in folder
 for image in os.listdir(folder_path):
     # Only consider jpg and jpeg for now
     if image.endswith(('.jpg', '.jpeg')):
+        region_num += 1
         image_path = os.path.join(folder_path, image)
         image_obj = io.imread(image_path, as_gray=True)
 
@@ -106,6 +138,7 @@ for image in os.listdir(folder_path):
         # Make a list for the test strip regions within the image
         test_strips = []
         detect_lateral_flow_tests(image_obj, test_strips)
+        test_strips = remove_outliers(test_strips)
 
         # Go though test strips and make a new list of images of just the test strips
         test_strip_images = []
@@ -114,18 +147,9 @@ for image in os.listdir(folder_path):
             # Adjust indecies so that they are always in the bounds of the image
             maxr, maxc = min(max(maxr, minr + min_maxr), len(image_obj)), min(max(maxc, minc + min_maxc), len(image_obj[0]))
             test_strip_images.append(image_obj[minr:maxr, minc:maxc])
-        # for test in test_strips:
-        #     minr, minc, maxr, maxc = test.bbox
-        #     draw_rectangle(minr, minc, maxr, maxc)
-        for test in test_strip_images:
-            lines = []
-            detect_lateral_flow_tests(test, lines)
-            for line in lines:
-                minr, minc, maxr, maxc = line.bbox
-                draw_rectangle(minr, minc, maxr, maxc)
-            plt.imshow(test)
-            plt.show()
-
+        
+        for test_image in test_strip_images:
+            detect_lines(test_image)
 		# Display the image with detected tests
         # plt.imshow(image_obj)
         # plt.axis('off')
