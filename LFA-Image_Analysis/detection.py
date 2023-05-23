@@ -115,14 +115,33 @@ def detect_lines(image):
     plt.imshow(image)
     image_copy = np.copy(image)
     image_copy = sk.exposure.adjust_gamma(image_copy, 0.4)
-
+    
+    line_length = 2
     # Rescale the intensity within the desired range
-    rescaled_image = sk.exposure.equalize_adapthist(image_copy, nbins=128)
+    enhanced_image = sk.exposure.equalize_adapthist(image_copy)
+    p80, p99 = np.percentile(enhanced_image, (80, 92))
+    enhanced_image = sk.exposure.rescale_intensity(enhanced_image, in_range=(p80, p99))
 
+    thresholded_image = sk.filters.threshold_local(enhanced_image, block_size=3, method='gaussian', mode='reflect')
+
+    elevation_map = sk.filters.sobel(thresholded_image)
+
+    background_color = np.mean(image[len(image[0]) // 2: (len(image[0]) // 2) + 1, len(image) // 2: (len(image) // 2) + 1], axis=(0, 1))
     # Label connected regions in the binary image
-    # labeled_image = sk.measure.label(image_copy)
+    labeled_image = sk.measure.label(thresholded_image)
+    for region in regionprops(labeled_image):
+        # Get the bounding box coordinates of the region
+        minr, minc, maxr, maxc = region.bbox
+        # Calculate the mean color within the bounding box
+        mean_color = np.mean(image[minr:maxr, minc:maxc], axis=(0, 1))
+
+        # Check if the mean color is lighter than the background color and the region is big enough to qualify as a test strip
+        # if mean_color > background_color and (region.area > 20 and region.area < 70):
+            # Draw a rectangle around the detected test
+        draw_rectangle(minr, minc, maxr, maxc)
+
     fig.add_subplot(1, 2, 2)
-    plt.imshow(rescaled_image)
+    plt.imshow(enhanced_image)
     plt.show()
 
 angle_threshold = 10
@@ -150,6 +169,7 @@ for image in os.listdir(folder_path):
 
         # Go though test strips and make a new list of images of just the test strips
         test_strip_images = []
+        print(image)
         for test in test_strips:
             minr, minc, maxr, maxc = test.bbox
             # Adjust indecies so that they are always in the bounds of the image
