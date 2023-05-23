@@ -1,7 +1,7 @@
 import os
 import numpy as np
 import skimage as sk
-from skimage import io, color, filters
+from skimage import io, color, filters, restoration
 from skimage.measure import label, regionprops
 from skimage import morphology
 import matplotlib.pyplot as plt
@@ -14,11 +14,12 @@ global region_num
 
 def detect_lateral_flow_tests(image, lst, line_length = 10):
     # Increase gammma of the image
-    image = sk.exposure.adjust_gamma(image, 0.4)
+    image_copy = np.copy(image)
+    image_copy = sk.exposure.adjust_gamma(image_copy, 0.4)
 
     # Create a binary mask based on color thresholding
-    threshold = filters.threshold_otsu(image)
-    threshold_image = image > threshold
+    threshold = filters.threshold_otsu(image_copy)
+    threshold_image = image_copy > threshold
     edges = sk.feature.canny(threshold_image)
 
     # Perform Hough line detection
@@ -38,7 +39,7 @@ def detect_lateral_flow_tests(image, lst, line_length = 10):
     labeled = label(dilated)
     background_color = np.mean(labeled[0:1, 0:1], axis=(0, 1))
     # Analyze each labeled region
-    copy_image = np.copy(image)
+    copy_image = np.copy(image_copy)
     for region in regionprops(labeled):
         # Get the bounding box coordinates of the region
         minr, minc, maxr, maxc = region.bbox
@@ -52,7 +53,7 @@ def detect_lateral_flow_tests(image, lst, line_length = 10):
             if check_duplicate(minr, minc, maxr, maxc, lst):
                 straighten_region(copy_image, region, angles)
                 lst.append(region)
-    image = copy_image
+    image_copy = copy_image
 
 def straighten_region(copy_image, region, angles):
     minr, minc, maxr, maxc = region.bbox
@@ -108,13 +109,20 @@ def remove_outliers(lst):
     return new_lst
 
 def detect_lines(image):
+    
+    fig = plt.figure(figsize=(10,7))
+    fig.add_subplot(1, 2, 1)
+    plt.imshow(image)
+    image_copy = np.copy(image)
+    image_copy = sk.exposure.adjust_gamma(image_copy, 0.4)
 
-    # Apply a threshold to identify regions of interest
-    edges = sk.feature.canny(image)
+    # Rescale the intensity within the desired range
+    rescaled_image = sk.exposure.equalize_adapthist(image_copy, nbins=128)
 
     # Label connected regions in the binary image
-    labeled_image = sk.measure.label(edges)
-    plt.imshow(labeled_image)
+    # labeled_image = sk.measure.label(image_copy)
+    fig.add_subplot(1, 2, 2)
+    plt.imshow(rescaled_image)
     plt.show()
 
 angle_threshold = 10
