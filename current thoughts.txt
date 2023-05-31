@@ -1,0 +1,66 @@
+
+image1.jpg --- min_area = len * 2, max_area = len * 12
+can consistenly detect control line but also highlights small
+fragments
+
+
+image2.jpeg --- having area be >> min_area doesn't work
+area is not large enough, region found is often a smaller
+subset of the whole area
+
+range 85 - 92 works better but causes the detection of random areas
+min_area = len * 2, max_area = len * 12 (maybe lessen)
+
+
+image3.jpg --- min_area = len * 3, max_area = len * 12
+Can consistently find control line
+
+
+image4.jpg --- test and control lines blend in with background
+so much that they can't be detected, would have to drastically alter
+image pre-processing to get it to work
+
+
+TESTS using range 85 - 92 and min_area = len * 2, max_area = len * 12
+extending region if > min_area
+only drawing if horizontally rectangular and area < max_area
+
+
+image1
+strip1 - gets ctrl line
+strip2 - gets ctrl line, one small rectangular fragment (below ctrl line)
+strip3 - gets like half of ctrl line (very small rectangle, not extending so not meeting min_area requirement)
+strip4 - gets most of ctrl line (not extended)
+strip5 - gets ctrl line, very small fragments
+strip6 - gets ctrl line
+strip7 - gets ctrl line (detects big region, bigger box around it)
+strip8 - gets ctrl line (not extended)
+strip9 - gets ctrl line, 2 small rectangular fagments (one above one below)
+strip10 - gets ctrl line (not extended)
+strip height = 5ish out of 240 (2%)
+
+
+image2 - fragments where solution piles up
+strip1 - gets ctrl line (not extended), one big rectangular framgent and small fragment below
+strip2 - gets ctrl line (not extended), one square fragment and one really small fragment below
+strip3 - gets ctrl line (not extended), one big rectangular fragment below
+strip4 - gets ctrl line, one big rectangular fragment below
+strip5 - gets ctrl line (not extended), one big rectangular fragment above, one below
+strip6 - gets ctrl line, one big rectangular fragment above, one below
+strip7 - gets ctrl line, one rectanuglar fragment below
+strip8 - doesn't get control line, only fragment below
+strip9 - gets ctrl line, one big fragment above, 2 small ones below
+strip10 - gets ctrl line (not extended), one big fragment above, one below
+strip height = 4ish out of 240 (1.6%)
+
+
+image3
+strip1 - doesn't get ctrl line, only line below
+strip2 - ^
+strip3 - doesn't get anything
+strip4 - ^
+strip5 - ^
+strip6 - ^
+strip height = 20ish out of 1000 (2%)
+
+use range of (1.5% to 4%)
