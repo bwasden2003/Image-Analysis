@@ -110,16 +110,17 @@ def remove_outliers(lst):
 
 def detect_lines(image):
 
-    min_area = len(image[0])
-    max_area = len(image[0]) * 8
+    # found that the strips vary from about 2% of the length of the image to like 4%
+    min_area = len(image[0]) * (len(image) * 0.015)
+    max_area = len(image[0]) * (len(image) * 0.04)
 
     fig = plt.figure(figsize=(10,7))
     fig.add_subplot(1, 2, 1)
     plt.imshow(image)
     image_copy = np.copy(image)
-    image_copy = sk.exposure.adjust_gamma(image_copy, 0.35)
+    image_copy = sk.exposure.adjust_gamma(image_copy, 0.4)
     enhanced_image = sk.exposure.equalize_adapthist(image_copy)
-    p80, p99 = np.percentile(enhanced_image, (85, 98))
+    p80, p99 = np.percentile(enhanced_image, (85, 92))
     enhanced_image = sk.exposure.rescale_intensity(enhanced_image, in_range=(p80, p99), out_range=(0, 1))
     
     thresholded_image = sk.filters.threshold_local(enhanced_image, block_size=3, method='gaussian', mode='reflect')
@@ -131,13 +132,16 @@ def detect_lines(image):
         # Get the bounding box coordinates of the region
         minr, minc, maxr, maxc = region.bbox
         if region.area > min_area:
+            print("area >")
             minc = 0
             maxc = len(image[0])
         # Check if the region is big enough to qualify as a test strip
         # Draw a rectangle around the detected test
         area = (maxc - minc) * (maxr - minr)
-        # if ((maxc - minc) > (maxr - minr)) and area < max_area:
-        draw_rectangle(minr, minc, maxr, maxc)
+        if ((maxc - minc) > (maxr - minr)) and (area < max_area):
+            draw_rectangle(minr, minc, maxr, maxc)
+        else:
+            print(str(area) + " --- max: " + str(max_area) + " --- min: " + str(min_area))
     fig.add_subplot(1, 2, 2)
     plt.imshow(thresholded_image)
     plt.show()
@@ -148,7 +152,7 @@ region_num = 0
 # Iterate through images in folder
 for image in os.listdir(folder_path):
     # Only consider jpg and jpeg for now
-    if image.endswith(('.jpg', '.jpeg')) and region_num == 2:
+    if image.endswith(('.jpg', '.jpeg')) and region_num == 0:
         image_path = os.path.join(folder_path, image)
         image_obj = io.imread(image_path, as_gray=True)
 
