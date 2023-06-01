@@ -63,4 +63,15 @@ strip5 - ^
 strip6 - ^
 strip height = 20ish out of 1000 (2%)
 
-use range of (1.5% to 4%)
+use range of (.65% to 4%)
+percentile 80-99
+image1
+works
+80-92 works for all but 3
+
+image2
+works with lower percentile upper bound 80 - 92, median, block_size 3
+
+
+image3
+works

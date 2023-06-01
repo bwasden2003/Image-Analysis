@@ -108,40 +108,57 @@ def remove_outliers(lst):
             new_lst.append(region)
     return new_lst
 
+def detect_corners(image):
+    coords = sk.feature.corner_peaks(sk.feature.corner_harris(image), min_distance=5, threshold_rel=0.02)
+    coords_subpix = sk.feature.corner_subpix(image, coords, window_size=13)
+    fig, ax = plt.subplots()
+    ax.imshow(image, cmap=plt.cm.gray)
+    ax.plot(coords[:, 1], coords[:, 0], color='cyan', marker='o',
+            linestyle='None', markersize=6)
+    ax.plot(coords_subpix[:, 1], coords_subpix[:, 0], '+r', markersize=15)
+    ax.axis((0, 310, 200, 0))
+    plt.show()
+
 def detect_lines(image):
 
     # found that the strips vary from about 2% of the length of the image to like 4%
-    min_area = len(image[0]) * (len(image) * 0.015)
+    min_area = len(image[0]) * (len(image) * 0.0065)
     max_area = len(image[0]) * (len(image) * 0.04)
 
     fig = plt.figure(figsize=(10,7))
     fig.add_subplot(1, 2, 1)
     plt.imshow(image)
     image_copy = np.copy(image)
-    image_copy = sk.exposure.adjust_gamma(image_copy, 0.4)
+    image_copy = sk.exposure.adjust_gamma(image_copy, 0.3)
     enhanced_image = sk.exposure.equalize_adapthist(image_copy)
-    p80, p99 = np.percentile(enhanced_image, (85, 92))
+    p80, p99 = np.percentile(enhanced_image, (80, 92))
     enhanced_image = sk.exposure.rescale_intensity(enhanced_image, in_range=(p80, p99), out_range=(0, 1))
     
-    thresholded_image = sk.filters.threshold_local(enhanced_image, block_size=3, method='gaussian', mode='reflect')
+    thresholded_image = sk.filters.threshold_local(enhanced_image, block_size=3, method='median', mode='reflect')
 
-    # canny = sk.feature.canny(thresholded_image)
+    canny = sk.feature.canny(thresholded_image)
     # Label connected regions in the binary image
     labeled_image = sk.measure.label(thresholded_image)
+
+    strips = []
     for region in regionprops(labeled_image):
         # Get the bounding box coordinates of the region
         minr, minc, maxr, maxc = region.bbox
-        if region.area > min_area:
+        # Calculate the area of the bounding box
+        area = (maxc - minc) * (maxr - minr)
+        # If bounding box area is greater than min_area we expand the bounding box coordinates to the whole width of the image
+        if area > min_area and (maxc - minc) > (maxr - minr):
             print("area >")
             minc = 0
             maxc = len(image[0])
         # Check if the region is big enough to qualify as a test strip
         # Draw a rectangle around the detected test
         area = (maxc - minc) * (maxr - minr)
-        if ((maxc - minc) > (maxr - minr)) and (area < max_area):
+        if ((maxc - minc) > (maxr - minr)) and (area < max_area and area > min_area):
+            strips.append(region)
             draw_rectangle(minr, minc, maxr, maxc)
-        else:
-            print(str(area) + " --- max: " + str(max_area) + " --- min: " + str(min_area))
+        # elif (maxc - minc) > (maxr - minr):
+        #     print(str(area) + " --- max: " + str(max_area) + " --- min: " + str(min_area))
     fig.add_subplot(1, 2, 2)
     plt.imshow(thresholded_image)
     plt.show()

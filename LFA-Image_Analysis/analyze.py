@@ -40,8 +40,8 @@ def histogram():
 
 def corner_detection():
 	global image_obj
-	coords = sk.feature.corner_peaks(sk.feature.corner_harris(image_obj), min_distance=5, threshold_rel=0.02)
-	coords_subpix = sk.feature.corner_subpix(image_obj, coords, window_size=13)
+	coords = sk.feature.corner_peaks(sk.feature.corner_harris(image_obj), min_distance=3, threshold_rel=0.02)
+	coords_subpix = sk.feature.corner_subpix(image_obj, coords, window_size=7)
 
 	fig, ax = mp.subplots()
 	ax.imshow(image_obj, cmap=mp.cm.gray)
