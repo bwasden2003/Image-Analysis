@@ -5,7 +5,7 @@ works, 80-99, clip_limit = 0.05
 80-92 works for all but 4
 
 image2
-works with lower percentile upper bound 80 - 92, median, block_size 3, kernel_size = (4, min_area), clip_limit = 0.03
+works with lower percentile upper bound 80 - 97
 
 image3
 works

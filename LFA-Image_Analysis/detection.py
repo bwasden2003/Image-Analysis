@@ -125,32 +125,27 @@ def detect_lines(image):
     min_area = len(image[0]) * (len(image) * 0.0065)
     max_area = len(image[0]) * (len(image) * 0.04)
 
-    fig = plt.figure(figsize=(10,7))
+    fig, ax = plt.figure(figsize=(10,7))
     fig.add_subplot(1, 2, 1)
     plt.imshow(image)
     image_copy = np.copy(image)
     image_copy = sk.filters.gaussian(image_copy)
-    thresholded_image = sk.filters.threshold_local(image_copy, block_size=3, method='median', mode='reflect')
+    thresholded_image = sk.filters.threshold_local(image_copy, block_size=3, method='gaussian', mode='reflect')
     
     image_copy = image_copy * (thresholded_image > 0)
 
     # Adjust gamma
-    image_copy = sk.exposure.adjust_gamma(image_copy, 0.3)
+    image_copy = sk.exposure.adjust_gamma(image_copy, 0.5)
 
     enhanced_image = sk.exposure.equalize_adapthist(image_copy, clip_limit=0.05)
 
     # Set percentiles for range
-    p80, p97 = np.percentile(enhanced_image, (80, 97))
+    p80, p97 = np.percentile(enhanced_image, (80, 99))
     enhanced_image = sk.exposure.rescale_intensity(enhanced_image, in_range=(p80, p97), out_range=(0, 1))
 
-    edges = filters.sobel(enhanced_image)
-
-    # Step 4: Analyze and classify the shapes
-    # Find contours of potential shapes
-    contours = sk.measure.find_contours(edges, 0.1)
-
+    contours = sk.measure.find_contours(enhanced_image)
     # Label connected regions in the binary image
-    labeled_image = sk.measure.label(edges)
+    labeled_image = sk.measure.label(enhanced_image)
     
     strips = []
     for region in regionprops(labeled_image):
@@ -171,61 +166,7 @@ def detect_lines(image):
         # elif (maxc - minc) > (maxr - minr):
         #     print(str(area) + " --- max: " + str(max_area) + " --- min: " + str(min_area))
     fig.add_subplot(1, 2, 2)
-    plt.imshow(edges)
-    plt.show()
-
-def ai_attempt(image):
-    # Step 2: Preprocessing techniques (e.g., noise reduction or contrast enhancement)
-    # Apply a Gaussian blur to reduce noise
-    image_blurred = filters.gaussian(image, sigma=1.0)
-
-    # Step 3: Detect potential rectangular shapes
-    # Apply an edge detection algorithm to find edges in the image
-    edges = filters.sobel(image_blurred)
-
-    # Step 4: Analyze and classify the shapes
-    # Find contours of potential shapes
-    contours = sk.measure.find_contours(edges, 0.1)
-
-    # Define parameters for rectangle detection
-    min_rectangle_area = len(image[0]) * (len(image) * 0.0065)  # Minimum area to consider a shape as a rectangle
-    min_rectangle_aspect_ratio = 0.5  # Minimum aspect ratio to consider a shape as a rectangle
-
-    # Iterate over the identified contours
-    rectangles = []
-    for contour in contours:
-        # Approximate the contour with a polygon
-        polygon = sk.measure.approximate_polygon(contour, tolerance=5)
-
-        # Check if the polygon has four vertices (rectangle)
-        if len(polygon) == 4:
-            # Calculate the area and aspect ratio of the rectangle
-            x, y = zip(*polygon)
-            area = 0.5 * np.abs(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1)))
-            aspect_ratio = (max(x) - min(x)) / (max(y) - min(y))
-
-            # Check if the area and aspect ratio meet the criteria for a rectangle
-            if area > min_rectangle_area and aspect_ratio > min_rectangle_aspect_ratio:
-                rectangles.append(polygon)
-
-    # Step 5: Label the rectangles in the image
-    labeled_image = np.zeros_like(image)
-    for i, rectangle in enumerate(rectangles):
-        # Draw the rectangle on the labeled image
-        labeled_image[sk.measure.grid_points_in_poly(image.shape, rectangle)] = i + 1
-
-    # Step 6: Display the original grayscale image with labeled rectangles
-    fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(10, 5))
-    axes[0].imshow(image, cmap='gray')
-    axes[0].set_title('Original Image')
-    axes[0].axis('off')
-
-    axes[1].imshow(image, cmap='gray')
-    axes[1].imshow(labeled_image, cmap='rainbow', alpha=0.5)
-    axes[1].set_title('Labeled Rectangles')
-    axes[1].axis('off')
-
-    plt.tight_layout()
+    plt.imshow(contours)
     plt.show()
 
 angle_threshold = 10
@@ -234,7 +175,7 @@ region_num = 0
 # Iterate through images in folder
 for image in os.listdir(folder_path):
     # Only consider jpg and jpeg for now
-    if image.endswith(('.jpg', '.jpeg')) and region_num == 2:
+    if image.endswith(('.jpg', '.jpeg')) and region_num == 1:
         image_path = os.path.join(folder_path, image)
         image_obj = io.imread(image_path, as_gray=True)
 
