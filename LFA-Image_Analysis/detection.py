@@ -1,16 +1,23 @@
 import os
 import numpy as np
+
 import skimage as sk
 from skimage import io, color, filters, restoration
 from skimage.measure import label, regionprops
 from skimage import morphology
+
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
-global image_obj
-global min_maxr, min_maxc
-global angle_threshold
-global region_num
+import imagej
+
+import tkinter as tk
+from tkinter import filedialog
+
+image_obj = None
+min_maxr, min_maxc = 0, 0
+angle_threshold = 0
+
 
 def detect_lateral_flow_tests(image, lst, line_length = 10):
     # Increase gammma of the image
@@ -119,15 +126,15 @@ def detect_corners(image):
     ax.axis((0, 310, 200, 0))
     plt.show()
 
-def detect_lines(image):
+def detect_lines(image) -> list:
 
     # found that the strips vary from about 2% of the length of the image to like 4%
     min_area = len(image[0]) * (len(image) * 0.0065)
     max_area = len(image[0]) * (len(image) * 0.04)
 
-    fig = plt.figure(figsize=(10,7))
-    fig.add_subplot(1, 2, 1)
-    plt.imshow(image)
+    # fig = plt.figure(figsize=(10,7))
+    # fig.add_subplot(1, 2, 1)
+    # plt.imshow(image)
     image_copy = np.copy(image)
     image_copy = sk.filters.gaussian(image_copy)
     thresholded_image = sk.filters.threshold_local(image_copy, block_size=3, method='median', mode='reflect')
@@ -140,7 +147,7 @@ def detect_lines(image):
     enhanced_image = sk.exposure.equalize_adapthist(image_copy, clip_limit=0.05)
 
     # Set percentiles for range
-    p80, p97 = np.percentile(enhanced_image, (80, 97))
+    p80, p97 = np.percentile(enhanced_image, (80, 99))
     enhanced_image = sk.exposure.rescale_intensity(enhanced_image, in_range=(p80, p97), out_range=(0, 1))
 
     edges = filters.sobel(enhanced_image)
@@ -150,7 +157,7 @@ def detect_lines(image):
     contours = sk.measure.find_contours(edges, 0.1)
 
     # Label connected regions in the binary image
-    labeled_image = sk.measure.label(edges)
+    labeled_image = sk.measure.label(enhanced_image)
     
     strips = []
     for region in regionprops(labeled_image):
@@ -165,78 +172,51 @@ def detect_lines(image):
         # Check if the region is big enough to qualify as a test strip
         # Draw a rectangle around the detected test
         # area = (maxc - minc) * (maxr - minr)
-        # if ((maxc - minc) > (maxr - minr)) and (area < max_area and area > min_area):
-        #     strips.append(region)
-        draw_rectangle(minr, minc, maxr, maxc)
+        if ((maxc - minc) > (maxr - minr)) and (area < max_area and area > min_area):
+            strips.append([minr, maxr, minc, maxc])
+            # draw_rectangle(minr, minc, maxr, maxc)
         # elif (maxc - minc) > (maxr - minr):
         #     print(str(area) + " --- max: " + str(max_area) + " --- min: " + str(min_area))
-    fig.add_subplot(1, 2, 2)
-    plt.imshow(edges)
-    plt.show()
+    # fig.add_subplot(1, 2, 2)
+    # plt.imshow(edges)
+    # plt.show()
+    return (image, strips)
 
-def ai_attempt(image):
-    # Step 2: Preprocessing techniques (e.g., noise reduction or contrast enhancement)
-    # Apply a Gaussian blur to reduce noise
-    image_blurred = filters.gaussian(image, sigma=1.0)
 
-    # Step 3: Detect potential rectangular shapes
-    # Apply an edge detection algorithm to find edges in the image
-    edges = filters.sobel(image_blurred)
+# Uses imageJ to analyze the control/test strip area
+def imageJ_analysis(ctrl_lines):
+    ij = imagej.init()
+    for image in ctrl_lines:
+        if len(ctrl_lines[1]) == 0:
+            #analyze whole image?
+            min_c, max_c, min_r, max_r = 0, len(ctrl_lines[0][0]), 0, len(ctrl_lines[0])
+        else:
+            ij.py.show(image[0])
 
-    # Step 4: Analyze and classify the shapes
-    # Find contours of potential shapes
-    contours = sk.measure.find_contours(edges, 0.1)
 
-    # Define parameters for rectangle detection
-    min_rectangle_area = len(image[0]) * (len(image) * 0.0065)  # Minimum area to consider a shape as a rectangle
-    min_rectangle_aspect_ratio = 0.5  # Minimum aspect ratio to consider a shape as a rectangle
+class MyGUI:
+    def __init__(self):
+        self.window = tk.Tk()
 
-    # Iterate over the identified contours
-    rectangles = []
-    for contour in contours:
-        # Approximate the contour with a polygon
-        polygon = sk.measure.approximate_polygon(contour, tolerance=5)
+        self.button = tk.Button(self.window, text="Open Image", command=self.open_image)
+        self.button.pack()
 
-        # Check if the polygon has four vertices (rectangle)
-        if len(polygon) == 4:
-            # Calculate the area and aspect ratio of the rectangle
-            x, y = zip(*polygon)
-            area = 0.5 * np.abs(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1)))
-            aspect_ratio = (max(x) - min(x)) / (max(y) - min(y))
+    def open_image(self):
+        # Image to analyze
+        file_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.png *.jpg *.jpeg")])
 
-            # Check if the area and aspect ratio meet the criteria for a rectangle
-            if area > min_rectangle_area and aspect_ratio > min_rectangle_aspect_ratio:
-                rectangles.append(polygon)
+        self.window.after(0, self.process_image, file_path)
 
-    # Step 5: Label the rectangles in the image
-    labeled_image = np.zeros_like(image)
-    for i, rectangle in enumerate(rectangles):
-        # Draw the rectangle on the labeled image
-        labeled_image[sk.measure.grid_points_in_poly(image.shape, rectangle)] = i + 1
+    def process_image(self, file_path):
+        global min_maxc
+        global min_maxr
+        global image_obj
+        global angle_threshold
 
-    # Step 6: Display the original grayscale image with labeled rectangles
-    fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(10, 5))
-    axes[0].imshow(image, cmap='gray')
-    axes[0].set_title('Original Image')
-    axes[0].axis('off')
+        angle_threshold = 10
 
-    axes[1].imshow(image, cmap='gray')
-    axes[1].imshow(labeled_image, cmap='rainbow', alpha=0.5)
-    axes[1].set_title('Labeled Rectangles')
-    axes[1].axis('off')
-
-    plt.tight_layout()
-    plt.show()
-
-angle_threshold = 10
-folder_path = 'images'
-region_num = 0
-# Iterate through images in folder
-for image in os.listdir(folder_path):
-    # Only consider jpg and jpeg for now
-    if image.endswith(('.jpg', '.jpeg')) and region_num == 2:
-        image_path = os.path.join(folder_path, image)
-        image_obj = io.imread(image_path, as_gray=True)
+        # Only consider jpg and jpeg for now
+        image_obj = io.imread(file_path, as_gray=True)
 
         # Find width (in pixels) of the current image
         width = len(image_obj[0])
@@ -252,17 +232,21 @@ for image in os.listdir(folder_path):
 
         # Go though test strips and make a new list of images of just the test strips
         test_strip_images = []
-        print(image)
         for test in test_strips:
             minr, minc, maxr, maxc = test.bbox
             # Adjust indecies so that they are always in the bounds of the image
             maxr, maxc = min(max(maxr, minr + min_maxr), len(image_obj)), min(max(maxc, minc + min_maxc), len(image_obj[0]))
             test_strip_images.append(image_obj[minr:maxr, minc:maxc])
-        
+
+        # Go through test strip images and find control lines, append results to list as tuple in form of (image, [dimensions of control line])
+        ctrl_lines = []
         for test_image in test_strip_images:
-            detect_lines(test_image)
-        # Display the image with detected tests
-        # plt.imshow(image_obj)
-        # plt.axis('off')
-        # plt.show()
-    region_num += 1
+            ctrl_lines.append(detect_lines(test_image))
+        imageJ_analysis(ctrl_lines)
+    
+    def run(self):
+        # Start the window's main loop
+        self.window.mainloop()
+
+gui = MyGUI()
+gui.run()
