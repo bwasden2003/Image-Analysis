@@ -173,7 +173,7 @@ def image_analysis(lines):
     image_plus = np.array(image_obj)
 
     plot_profiles = []
-    region_percentile = 1
+    region_percentile = .75
     line = 0
     for region in lines:
         line += 1
@@ -181,36 +181,61 @@ def image_analysis(lines):
         cropped_image = image_plus[int(min_r * (2 - region_percentile)):int(max_r * region_percentile), min_c:max_c]
         profile = np.mean(cropped_image, axis=1)
 
-        # Find regions with sharp slope increases
-        diff = np.diff(profile)
-        threshold = np.mean(diff) + 2 * np.std(diff)
-        mask = np.abs(diff) > threshold
+        # Calculate the differences between adjacent elements to find slopes
+        slopes = np.diff(profile)
 
-        x_values = np.arange(len(profile))
-        y_values = profile
+        # Find the indices where the slopes change sign (i.e., peak points)
+        positive_slope_indices = np.where(np.diff(np.sign(slopes)) > 0)[0] + 1
 
-        plt.plot(x_values, y_values, label='Profile')
+        # Identify the biggest peak
+        biggest_peak_index = np.argmax(profile)
+        biggest_peak = profile[biggest_peak_index]
 
-        increasing_slope = False
-        decreasing_slope = False
-        for i in range(1, len(mask)):
-            if mask[i] and not increasing_slope and not decreasing_slope:
-                if diff[i-1] >= 0 and y_values[i] > np.mean(y_values):
-                    plt.scatter(x_values[i], y_values[i], color='red', label='Slope Increase')
-                    increasing_slope = True
-            elif not mask[i]:
-                increasing_slope = False
-                decreasing_slope = False
-            elif mask[i] and increasing_slope:
-                if diff[i-1] < 0:
-                    increasing_slope = False
-                    decreasing_slope = True
+        # Identify a smaller peak (approximately 25% to 50% of the biggest peak)
+        peak_threshold = 0.25 * biggest_peak
+        candidate_peaks = [i for i in positive_slope_indices if profile[i] >= peak_threshold]
+        smaller_peak_index = min(candidate_peaks, key=lambda x: abs(profile[x] - 0.5 * biggest_peak))
+        smaller_peak = profile[smaller_peak_index]
 
-    plt.xlabel('Distance')
-    plt.ylabel('Intensity')
-    plt.legend()
+        # Find the start and end indices of each peak based on slope changes
+        peak_start_indices = []
+        peak_end_indices = []
+        current_peak_start = candidate_peaks[0]
+        for i in range(1, len(candidate_peaks)):
+            if slopes[candidate_peaks[i]] > slopes[candidate_peaks[i - 1]]:
+                # The slope is increasing, update the current peak end
+                current_peak_end = candidate_peaks[i - 1]
+                peak_start_indices.append(current_peak_start)
+                peak_end_indices.append(current_peak_end)
+                current_peak_start = candidate_peaks[i]
 
-    plt.show()
+        if len(candidate_peaks) > 0:
+            # Add the last peak
+            peak_start_indices.append(current_peak_start)
+            peak_end_indices.append(candidate_peaks[-1])
+
+        # Mark the peaks by closing them off with lines
+        marked_profile = np.copy(profile)
+        for start, end in zip(peak_start_indices, peak_end_indices):
+            marked_profile[start:end + 1] = profile[start]
+
+        # Calculate the area under each peak (integral)
+        area_biggest_peak = np.trapz(profile[biggest_peak_index:], dx=1)
+        area_smaller_peak = np.trapz(profile[smaller_peak_index:], dx=1)
+
+        # Display the number of peaks found and their corresponding areas
+        print(f"Number of peaks found: {len(candidate_peaks)}")
+        print(f"Area under the biggest peak: {area_biggest_peak}")
+        print(f"Area under the smaller peak: {area_smaller_peak}")
+
+        # Plotting the results
+        plt.plot(profile, label='Profile')
+        plt.plot(marked_profile, label='Marked Peaks')
+        plt.xlabel('Index')
+        plt.ylabel('Value')
+        plt.legend()
+        plt.show()
+        plt.clf()  # Clear the current figure for the next iteration
 
 class MyGUI:
     def __init__(self):
