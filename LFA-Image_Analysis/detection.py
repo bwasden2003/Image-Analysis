@@ -1,16 +1,25 @@
 import os
+import threading
 import numpy as np
+
 import skimage as sk
 from skimage import io, color, filters, restoration
 from skimage.measure import label, regionprops
 from skimage import morphology
+
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
-global image_obj
-global min_maxr, min_maxc
-global angle_threshold
-global region_num
+import imagej
+
+import tkinter as tk
+from tkinter import filedialog
+
+image_obj = None
+min_maxr, min_maxc = 0, 0
+angle_threshold = 0
+file_path=""
+
 
 def detect_lateral_flow_tests(image, lst, line_length = 10):
     # Increase gammma of the image
@@ -108,26 +117,15 @@ def remove_outliers(lst):
             new_lst.append(region)
     return new_lst
 
-def detect_corners(image):
-    coords = sk.feature.corner_peaks(sk.feature.corner_harris(image), min_distance=5, threshold_rel=0.02)
-    coords_subpix = sk.feature.corner_subpix(image, coords, window_size=13)
-    fig, ax = plt.subplots()
-    ax.imshow(image, cmap=plt.cm.gray)
-    ax.plot(coords[:, 1], coords[:, 0], color='cyan', marker='o',
-            linestyle='None', markersize=6)
-    ax.plot(coords_subpix[:, 1], coords_subpix[:, 0], '+r', markersize=15)
-    ax.axis((0, 310, 200, 0))
-    plt.show()
-
-def detect_lines(image):
+def detect_lines(image) -> list:
 
     # found that the strips vary from about 2% of the length of the image to like 4%
     min_area = len(image[0]) * (len(image) * 0.0065)
     max_area = len(image[0]) * (len(image) * 0.04)
 
-    fig, ax = plt.figure(figsize=(10,7))
-    fig.add_subplot(1, 2, 1)
-    plt.imshow(image)
+    # fig = plt.figure(figsize=(10,7))
+    # fig.add_subplot(1, 2, 1)
+    # plt.imshow(image)
     image_copy = np.copy(image)
     image_copy = sk.filters.gaussian(image_copy)
     thresholded_image = sk.filters.threshold_local(image_copy, block_size=3, method='gaussian', mode='reflect')
@@ -143,7 +141,6 @@ def detect_lines(image):
     p80, p97 = np.percentile(enhanced_image, (80, 99))
     enhanced_image = sk.exposure.rescale_intensity(enhanced_image, in_range=(p80, p97), out_range=(0, 1))
 
-    contours = sk.measure.find_contours(enhanced_image)
     # Label connected regions in the binary image
     labeled_image = sk.measure.label(enhanced_image)
     
@@ -160,24 +157,84 @@ def detect_lines(image):
         # Check if the region is big enough to qualify as a test strip
         # Draw a rectangle around the detected test
         # area = (maxc - minc) * (maxr - minr)
-        # if ((maxc - minc) > (maxr - minr)) and (area < max_area and area > min_area):
-        #     strips.append(region)
-        draw_rectangle(minr, minc, maxr, maxc)
+        if ((maxc - minc) > (maxr - minr)) and (area < max_area and area > min_area):
+            strips.append([minr, maxr, minc, maxc])
+            # draw_rectangle(minr, minc, maxr, maxc)
         # elif (maxc - minc) > (maxr - minr):
         #     print(str(area) + " --- max: " + str(max_area) + " --- min: " + str(min_area))
-    fig.add_subplot(1, 2, 2)
-    plt.imshow(contours)
+    # fig.add_subplot(1, 2, 2)
+    # plt.imshow(edges)
+    # plt.show()
+    return (image, strips)
+
+
+# Uses imageJ to analyze the control/test strip area
+def image_analysis(lines):
+    image_plus = np.array(image_obj)
+
+    plot_profiles = []
+    region_percentile = 1
+    line = 0
+    for region in lines:
+        line += 1
+        min_r, max_r, min_c, max_c = region[0], region[1], region[2], region[3]
+        cropped_image = image_plus[int(min_r * (2 - region_percentile)):int(max_r * region_percentile), min_c:max_c]
+        profile = np.mean(cropped_image, axis=1)
+
+        # Find regions with sharp slope increases
+        diff = np.diff(profile)
+        threshold = np.mean(diff) + 2 * np.std(diff)
+        mask = np.abs(diff) > threshold
+
+        x_values = np.arange(len(profile))
+        y_values = profile
+
+        plt.plot(x_values, y_values, label='Profile')
+
+        increasing_slope = False
+        decreasing_slope = False
+        for i in range(1, len(mask)):
+            if mask[i] and not increasing_slope and not decreasing_slope:
+                if diff[i-1] >= 0 and y_values[i] > np.mean(y_values):
+                    plt.scatter(x_values[i], y_values[i], color='red', label='Slope Increase')
+                    increasing_slope = True
+            elif not mask[i]:
+                increasing_slope = False
+                decreasing_slope = False
+            elif mask[i] and increasing_slope:
+                if diff[i-1] < 0:
+                    increasing_slope = False
+                    decreasing_slope = True
+
+    plt.xlabel('Distance')
+    plt.ylabel('Intensity')
+    plt.legend()
+
     plt.show()
 
-angle_threshold = 10
-folder_path = 'images'
-region_num = 0
-# Iterate through images in folder
-for image in os.listdir(folder_path):
-    # Only consider jpg and jpeg for now
-    if image.endswith(('.jpg', '.jpeg')) and region_num == 1:
-        image_path = os.path.join(folder_path, image)
-        image_obj = io.imread(image_path, as_gray=True)
+class MyGUI:
+    def __init__(self):
+        self.window = tk.Tk()
+
+        self.button = tk.Button(self.window, text="Open Image", command=self.open_image)
+        self.button.pack()
+
+    def open_image(self):
+        global file_path
+        # Image to analyze
+        file_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.png *.jpg *.jpeg")])
+
+        self.window.after(0, self.process_image, file_path)
+
+    def process_image(self, file_path):
+        global min_maxc
+        global min_maxr
+        global image_obj
+        global angle_threshold
+
+        angle_threshold = 10
+        # Only consider jpg and jpeg for now
+        image_obj = io.imread(file_path, as_gray=True)
 
         # Find width (in pixels) of the current image
         width = len(image_obj[0])
@@ -193,17 +250,21 @@ for image in os.listdir(folder_path):
 
         # Go though test strips and make a new list of images of just the test strips
         test_strip_images = []
-        print(image)
         for test in test_strips:
             minr, minc, maxr, maxc = test.bbox
             # Adjust indecies so that they are always in the bounds of the image
             maxr, maxc = min(max(maxr, minr + min_maxr), len(image_obj)), min(max(maxc, minc + min_maxc), len(image_obj[0]))
-            test_strip_images.append(image_obj[minr:maxr, minc:maxc])
-        
-        for test_image in test_strip_images:
-            detect_lines(test_image)
-        # Display the image with detected tests
-        # plt.imshow(image_obj)
-        # plt.axis('off')
-        # plt.show()
-    region_num += 1
+            test_strip_images.append([minr, maxr, minc, maxc])
+
+        # # Go through test strip images and find control lines, append results to list as tuple in form of (image, [dimensions of control line])
+        # ctrl_lines = []
+        # for test_image in test_strip_images:
+        #     ctrl_lines.append(detect_lines(test_image))
+        image_analysis(test_strip_images)
+    
+    def run(self):
+        # Start the window's main loop
+        self.window.mainloop()
+
+gui = MyGUI()
+gui.run()
