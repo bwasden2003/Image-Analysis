@@ -180,11 +180,12 @@ def image_analysis(lines):
         min_r, max_r, min_c, max_c = region[0], region[1], region[2], region[3]
         cropped_image = image_plus[int(min_r * (2 - region_percentile)):int(max_r * region_percentile), min_c:max_c]
         profile = np.mean(cropped_image, axis=1)
-        plot_profiles.append(profile)
+        plot_profiles.append([cropped_image, profile])
     
         # Calculate the differences between adjacent elements to find slopes
     plot_results = []
-    for profile in plot_profiles:
+    for pair in plot_profiles:
+        profile = pair[1]
         start_index, end_index, modified_array, area = analyze_peaks(profile)
 
         second_peak_data = profile[end_index + 1:]
