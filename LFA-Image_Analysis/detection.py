@@ -180,62 +180,85 @@ def image_analysis(lines):
         min_r, max_r, min_c, max_c = region[0], region[1], region[2], region[3]
         cropped_image = image_plus[int(min_r * (2 - region_percentile)):int(max_r * region_percentile), min_c:max_c]
         profile = np.mean(cropped_image, axis=1)
-
+        plot_profiles.append(profile)
+    
         # Calculate the differences between adjacent elements to find slopes
-        slopes = np.diff(profile)
+    plot_results = []
+    for profile in plot_profiles:
+        start_index, end_index, modified_array, area = analyze_peaks(profile)
 
-        # Find the indices where the slopes change sign (i.e., peak points)
-        positive_slope_indices = np.where(np.diff(np.sign(slopes)) > 0)[0] + 1
+        second_peak_data = profile[end_index + 1:]
+        if len(second_peak_data) > 1:
+            second_start_index, second_end_index, second_modified_array, second_area = analyze_peaks(second_peak_data)
+            second_start_index += end_index + 1
+            second_end_index += end_index + 1
 
-        # Identify the biggest peak
-        biggest_peak_index = np.argmax(profile)
-        biggest_peak = profile[biggest_peak_index]
+            # Plot the array with labeled start and end points for both peaks
+            plt.plot(profile, label='Original Array')
+            plt.plot(modified_array, label='Modified Array (First Peak)')
+            plt.scatter(start_index, profile[start_index], color='red', label='Start Index (First Peak)')
+            plt.scatter(end_index, profile[end_index], color='green', label='End Index (First Peak)')
+            plt.plot([start_index, end_index], [profile[start_index], profile[end_index]], 'k--',
+                    label='Diagonal Line (First Peak)')
 
-        # Identify a smaller peak (approximately 25% to 50% of the biggest peak)
-        peak_threshold = 0.25 * biggest_peak
-        candidate_peaks = [i for i in positive_slope_indices if profile[i] >= peak_threshold]
-        smaller_peak_index = min(candidate_peaks, key=lambda x: abs(profile[x] - 0.5 * biggest_peak))
-        smaller_peak = profile[smaller_peak_index]
+            # Offset the x-axis values for the second modified array
+            x_offset = len(profile[:end_index + 1])
+            plt.plot(np.arange(x_offset, x_offset + len(second_modified_array)), second_modified_array,
+                    label='Modified Array (Second Peak)')
+            plt.scatter(second_start_index, profile[second_start_index], color='purple',
+                        label='Start Index (Second Peak)')
+            plt.scatter(second_end_index, profile[second_end_index], color='orange',
+                        label='End Index (Second Peak)')
+            plt.plot([second_start_index, second_end_index],
+                    [profile[second_start_index], profile[second_end_index]], 'k--',
+                    label='Diagonal Line (Second Peak)')
+            plt.annotate(f'Area (Peak {1}): {area:.2f}', xy=(start_index, profile[start_index]),
+                     xytext=(start_index, profile[start_index] + 1), arrowprops=dict(arrowstyle='->'))
+            plt.annotate(f'Area (Peak {2}): {second_area:.2f}', xy=(second_start_index, profile[second_start_index]),
+                     xytext=(second_start_index, profile[second_start_index] + 1), arrowprops=dict(arrowstyle='->'))
+            
+            plt.xlabel('Index')
+            plt.ylabel('Value')
+            plt.title('Array Analysis')
+            plt.legend()
+            plt.show()
 
-        # Find the start and end indices of each peak based on slope changes
-        peak_start_indices = []
-        peak_end_indices = []
-        current_peak_start = candidate_peaks[0]
-        for i in range(1, len(candidate_peaks)):
-            if slopes[candidate_peaks[i]] > slopes[candidate_peaks[i - 1]]:
-                # The slope is increasing, update the current peak end
-                current_peak_end = candidate_peaks[i - 1]
-                peak_start_indices.append(current_peak_start)
-                peak_end_indices.append(current_peak_end)
-                current_peak_start = candidate_peaks[i]
+            plot_results.append([(start_index, end_index, area), (second_start_index, second_end_index, second_area)])
+        else:
+            plot_results.append([(start_index, end_index, area)])
+    
+    for result in plot_results:
+        if len(result) > 1:
+            start_index, end_index, area = result[0]
+            second_start_index, second_end_index, second_area = result[1]
+            print(f"Peak {1} - Start index: {start_index}, End index: {end_index}, Area: {area}")
+            print(f"Peak {2} - Start index: {second_start_index}, End index: {second_end_index}, Area: {second_area}")
+        else:
+            start_index, end_index, area = result[0]
+            print(f"Peak {1} - Start index: {start_index}, End index: {end_index}, Area: {area}")
+            
 
-        if len(candidate_peaks) > 0:
-            # Add the last peak
-            peak_start_indices.append(current_peak_start)
-            peak_end_indices.append(candidate_peaks[-1])
+def analyze_peaks(profile):
+    peak_index = np.argmax(profile)
 
-        # Mark the peaks by closing them off with lines
-        marked_profile = np.copy(profile)
-        for start, end in zip(peak_start_indices, peak_end_indices):
-            marked_profile[start:end + 1] = profile[start]
+    # Search backward to find the start index
+    start_index = peak_index
+    while start_index > 0 and profile[start_index] >= profile[start_index - 1]:
+        start_index -= 1
 
-        # Calculate the area under each peak (integral)
-        area_biggest_peak = np.trapz(profile[biggest_peak_index:], dx=1)
-        area_smaller_peak = np.trapz(profile[smaller_peak_index:], dx=1)
+    # Search forward to find the end index
+    end_index = peak_index
+    while end_index < len(profile) - 1 and profile[end_index] >= profile[end_index + 1]:
+        end_index += 1
 
-        # Display the number of peaks found and their corresponding areas
-        print(f"Number of peaks found: {len(candidate_peaks)}")
-        print(f"Area under the biggest peak: {area_biggest_peak}")
-        print(f"Area under the smaller peak: {area_smaller_peak}")
+    # Create a line segment connecting start_index and end_index
+    modified_array = np.copy(profile)
+    modified_array[start_index:end_index + 1] = np.linspace(profile[start_index], profile[end_index],
+                                                            end_index - start_index + 1)
 
-        # Plotting the results
-        plt.plot(profile, label='Profile')
-        plt.plot(marked_profile, label='Marked Peaks')
-        plt.xlabel('Index')
-        plt.ylabel('Value')
-        plt.legend()
-        plt.show()
-        plt.clf()  # Clear the current figure for the next iteration
+    area = np.trapz(profile[start_index:end_index + 1]) - np.trapz(modified_array[start_index:end_index + 1])
+    
+    return start_index, end_index, modified_array, area
 
 class MyGUI:
     def __init__(self):
