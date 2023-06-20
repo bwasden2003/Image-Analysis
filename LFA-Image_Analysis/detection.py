@@ -1,5 +1,4 @@
 import os
-import threading
 import numpy as np
 
 import skimage as sk
@@ -9,11 +8,11 @@ from skimage import morphology
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-
-import imagej
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 import tkinter as tk
 from tkinter import filedialog
+from PIL import ImageTk, Image
 
 image_obj = None
 min_maxr, min_maxc = 0, 0
@@ -194,49 +193,20 @@ def image_analysis(lines):
             second_start_index += end_index + 1
             second_end_index += end_index + 1
 
-            # Plot the array with labeled start and end points for both peaks
-            plt.plot(profile, label='Original Array')
-            plt.plot(modified_array, label='Modified Array (First Peak)')
-            plt.scatter(start_index, profile[start_index], color='red', label='Start Index (First Peak)')
-            plt.scatter(end_index, profile[end_index], color='green', label='End Index (First Peak)')
-            plt.plot([start_index, end_index], [profile[start_index], profile[end_index]], 'k--',
-                    label='Diagonal Line (First Peak)')
-
-            # Offset the x-axis values for the second modified array
-            x_offset = len(profile[:end_index + 1])
-            plt.plot(np.arange(x_offset, x_offset + len(second_modified_array)), second_modified_array,
-                    label='Modified Array (Second Peak)')
-            plt.scatter(second_start_index, profile[second_start_index], color='purple',
-                        label='Start Index (Second Peak)')
-            plt.scatter(second_end_index, profile[second_end_index], color='orange',
-                        label='End Index (Second Peak)')
-            plt.plot([second_start_index, second_end_index],
-                    [profile[second_start_index], profile[second_end_index]], 'k--',
-                    label='Diagonal Line (Second Peak)')
-            plt.annotate(f'Area (Peak {1}): {area:.2f}', xy=(start_index, profile[start_index]),
-                     xytext=(start_index, profile[start_index] + 1), arrowprops=dict(arrowstyle='->'))
-            plt.annotate(f'Area (Peak {2}): {second_area:.2f}', xy=(second_start_index, profile[second_start_index]),
-                     xytext=(second_start_index, profile[second_start_index] + 1), arrowprops=dict(arrowstyle='->'))
-            
-            plt.xlabel('Index')
-            plt.ylabel('Value')
-            plt.title('Array Analysis')
-            plt.legend()
-            plt.show()
-
-            plot_results.append([(start_index, end_index, area), (second_start_index, second_end_index, second_area)])
+            plot_results.append([pair[0], pair[1], [(start_index, end_index, area), (second_start_index, second_end_index, second_area)]])
         else:
-            plot_results.append([(start_index, end_index, area)])
+            plot_results.append([pair[0], pair[1], [(start_index, end_index, area)]]) 
     
-    for result in plot_results:
-        if len(result) > 1:
-            start_index, end_index, area = result[0]
-            second_start_index, second_end_index, second_area = result[1]
-            print(f"Peak {1} - Start index: {start_index}, End index: {end_index}, Area: {area}")
-            print(f"Peak {2} - Start index: {second_start_index}, End index: {second_end_index}, Area: {second_area}")
-        else:
-            start_index, end_index, area = result[0]
-            print(f"Peak {1} - Start index: {start_index}, End index: {end_index}, Area: {area}")
+    return plot_results
+    # for result in plot_results:
+    #     if len(result) > 1:
+    #         start_index, end_index, area = result[0]
+    #         second_start_index, second_end_index, second_area = result[1]
+    #         print(f"Peak {1} - Start index: {start_index}, End index: {end_index}, Area: {area}")
+    #         print(f"Peak {2} - Start index: {second_start_index}, End index: {second_end_index}, Area: {second_area}")
+    #     else:
+    #         start_index, end_index, area = result[0]
+    #         print(f"Peak {1} - Start index: {start_index}, End index: {end_index}, Area: {area}")
             
 
 def analyze_peaks(profile):
@@ -264,16 +234,30 @@ def analyze_peaks(profile):
 class MyGUI:
     def __init__(self):
         self.window = tk.Tk()
+        self.window.title("Image Results")
 
         self.button = tk.Button(self.window, text="Open Image", command=self.open_image)
         self.button.pack()
+
+        self.results = []
+        self.current_index = -1
+
+        # Create GUI components
+        self.canvas = tk.Canvas(self.window, width=400, height=400)
+        self.canvas.pack()
+
+        self.prev_button = tk.Button(self.window, text="Previous", command=self.show_previous)
+        self.prev_button.pack(side=tk.LEFT)
+
+        self.next_button = tk.Button(self.window, text="Next", command=self.show_next)
+        self.next_button.pack(side=tk.LEFT)
+
 
     def open_image(self):
         global file_path
         # Image to analyze
         file_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.png *.jpg *.jpeg")])
-
-        self.window.after(0, self.process_image, file_path)
+        self.process_image(file_path)
 
     def process_image(self, file_path):
         global min_maxc
@@ -305,12 +289,78 @@ class MyGUI:
             maxr, maxc = min(max(maxr, minr + min_maxr), len(image_obj)), min(max(maxc, minc + min_maxc), len(image_obj[0]))
             test_strip_images.append([minr, maxr, minc, maxc])
 
-        # # Go through test strip images and find control lines, append results to list as tuple in form of (image, [dimensions of control line])
-        # ctrl_lines = []
-        # for test_image in test_strip_images:
-        #     ctrl_lines.append(detect_lines(test_image))
-        image_analysis(test_strip_images)
+        # Run image_analysis funciton
+        result = image_analysis(test_strip_images)
+
+        self.current_index = 0
+        self.results = result
+
+        # Display results
+        self.show_result()
     
+    def show_result(self):
+        result_image = self.results[self.current_index][0]
+        result_array = self.results[self.current_index][1]
+        result_params = self.results[self.current_index][2]
+
+        result_image = Image.fromarray(result_image)
+        result_image = result_image.resize((400, 400))
+        self.result_photo = ImageTk.PhotoImage(result_image)
+
+        self.canvas.create_image(0, 0, anchor=tk.NW, image=self.result_photo)
+        
+        if len(result_params) == 2:
+            # Get parameters from result_params
+            start_index = result_params[0][0]
+            end_index = result_params[0][1]
+            area = result_params[0][2]
+
+            second_start_index = result_params[1][0]
+            second_end_index = result_params[1][1]
+            second_area = result_params[1][2]
+
+            fig, (ax1, ax2) = plt.figure()
+            ax1.imshow(result_image)
+            ax1.axis("off")
+
+            ax2.plot(result_array, label='Original Array')
+            ax2.scatter(start_index, result_array[start_index], color='red', label='Start Index (First Peak)')
+            ax2.scatter(end_index, result_array[end_index], color='green', label='End Index (First Peak)')
+            ax2.plot([start_index, end_index], [result_array[start_index], result_array[end_index]], 'k--',
+                    label='Diagonal Line (First Peak)')
+
+            ax2.scatter(second_start_index, result_array[second_start_index], color='purple',
+                        label='Start Index (Second Peak)')
+            ax2.scatter(second_end_index, result_array[second_end_index], color='orange',
+                        label='End Index (Second Peak)')
+            ax2.plot([second_start_index, second_end_index],
+                    [result_array[second_start_index], result_array[second_end_index]], 'k--',
+                    label='Diagonal Line (Second Peak)')
+            ax2.annotate(f'Area (Peak {1}): {area:.2f}', xy=(start_index, result_array[start_index]),
+                        xytext=(start_index, result_array[start_index] + 1), arrowprops=dict(arrowstyle='->'))
+            ax2.annotate(f'Area (Peak {2}): {second_area:.2f}', xy=(second_start_index, result_array[second_start_index]),
+                        xytext=(second_start_index, result_array[second_start_index] + 1), arrowprops=dict(arrowstyle='->'))
+            
+            ax2.xlabel('Index')
+            ax2.ylabel('Value')
+            ax2.title('Array Analysis')
+            ax2.legend()
+
+        plt.tight_layout()
+        canvas = FigureCanvasTkAgg(fig, master=self.window)
+        canvas.draw()
+        canvas.get_tk_widget().pack(side=tk.LEFT)
+    
+    def show_previous(self):
+        if self.current_index > 0:
+            self.current_index -= 1
+            self.show_result()
+    
+    def show_next(self):
+        if self.current_index < len(self.results) - 1:
+            self.current_index += 1
+            self.show_result()
+
     def run(self):
         # Start the window's main loop
         self.window.mainloop()
