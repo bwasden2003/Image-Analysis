@@ -1,5 +1,10 @@
 import os
+
 import numpy as np
+
+import cv2
+
+import csv
 
 import skimage as sk
 from skimage import io, color, filters, restoration
@@ -21,7 +26,7 @@ file_path=""
 
 # https://stackoverflow.com/questions/55636313/selecting-an-area-of-an-image-with-a-mouse-and-recording-the-dimensions-of-the-s
 
-def detect_lateral_flow_tests(image, lst, line_length = 10):
+def detect_lateral_flow_tests(image, line_length = 10):
     # Increase gammma of the image
     image_copy = np.copy(image)
     image_copy = sk.exposure.adjust_gamma(image_copy, 0.4)
@@ -46,6 +51,7 @@ def detect_lateral_flow_tests(image, lst, line_length = 10):
     background_color = np.mean(labeled[0:1, 0:1], axis=(0, 1))
     # Analyze each labeled region
     copy_image = np.copy(image_copy)
+    lst = []
     for region in regionprops(labeled):
         # Get the bounding box coordinates of the region
         minr, minc, maxr, maxc = region.bbox
@@ -58,8 +64,15 @@ def detect_lateral_flow_tests(image, lst, line_length = 10):
             # Draw a rectangle around the detected test
             if check_duplicate(minr, minc, maxr, maxc, lst):
                 straighten_region(copy_image, region, angles)
-                lst.append(region)
+                lst.append([minr, maxr, minc, maxc])
     image_copy = copy_image
+    lst = remove_outliers(lst)
+    lfa_images = []
+    for region in lst:
+        minr, maxr, minc, maxc = region[0], region[1], region[2], region[3]
+        lfa_image = image_copy[minr:maxr, minc:maxc]
+        lfa_images.append(lfa_image)
+    return lfa_images
 
 def straighten_region(copy_image, region, angles):
     minr, minc, maxr, maxc = region.bbox
@@ -162,7 +175,7 @@ def detect_lines(image) -> list:
     return strips
 
 
-# Uses imageJ to analyze the control/test strip area
+# Function needs to be reworked so that it takes in one image and returns one output plot
 def image_analysis(test_strips):
     image_plus = np.array(image_obj, dtype='int64')
 
@@ -258,302 +271,202 @@ def analyze_peaks(profile):
     return start_index, end_index, modified_array, area
 
 class MyGUI:
-
-    SELECT_OPTS = dict(dash=(2, 2), stipple='gray25', fill='red',
-                          outline='')
-    
-    def __init__(self):
-        self.window = tk.Tk()
-        self.window.title("Image Results")
-
-        self.button = tk.Button(self.window, text="Open Image", command=self.open_image)
-        self.button.pack()
-
-        self.results = []
-        self.current_index = -1
-
-        # Create GUI components
-        self.window_width = self.window.winfo_screenwidth()
-        self.window_height = self.window.winfo_screenheight()
-        self.window.geometry("%dx%d" % (self.window_width, self.window_height))
-
-        self.image_label = tk.Label(self.window)
-        self.image_label.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        self.plot_label = tk.Frame(self.window)
-        self.plot_label.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        self.button_frame = tk.Frame(self.window)
-        self.button_frame.pack(side=tk.TOP, pady=10)
-
-        self.prev_button = tk.Button(self.button_frame, text="Previous", command=self.show_previous)
-        self.prev_button.pack(side=tk.LEFT, padx=10)
-
-        self.next_button = tk.Button(self.button_frame, text="Next", command=self.show_next)
-        self.next_button.pack(side=tk.LEFT, padx=10)
-
+    def __init__(self, root):
+        self.root = root
+        self.root.attributes('-fullscreen', True)
+        
+        self.image_path = None
+        self.original_image = None
+        self.cropped_images = []
+        self.current_region = 0
+        self.selected_region = None
+        self.analyzed_data = None
+        
+        self.canvas = tk.Canvas(self.root)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        self.button_open = tk.Button(self.root, text="Open Image", command=self.open_image)
+        self.button_open.pack(side=tk.TOP, padx=10, pady=10)
+        
+        self.button_previous = tk.Button(self.root, text="Previous", command=self.show_previous_region, state=tk.DISABLED)
+        self.button_previous.pack(side=tk.LEFT, padx=10, pady=10)
+        
+        self.button_next = tk.Button(self.root, text="Next", command=self.show_next_region, state=tk.DISABLED)
+        self.button_next.pack(side=tk.LEFT, padx=10, pady=10)
+        
+        self.button_choose_region = tk.Button(self.root, text="Choose Region", command=self.choose_region, state=tk.DISABLED)
+        self.button_choose_region.pack(side=tk.LEFT, padx=10, pady=10)
+        
+        self.button_analyze_plot = tk.Button(self.root, text="Analyze Plot", command=self.analyze_plot, state=tk.DISABLED)
+        self.button_analyze_plot.pack(side=tk.LEFT, padx=10, pady=10)
+        
+        self.button_download = tk.Button(self.root, text="Download Data", command=self.download_data, state=tk.DISABLED)
+        self.button_download.pack(side=tk.LEFT, padx=10, pady=10)
+        
+        self.root.protocol("WM_DELETE_WINDOW", self.close)
 
     def open_image(self):
-        global file_path
-        # Image to analyze
-        file_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.png *.jpg *.jpeg")])
-        self.process_image(file_path)
-
-    def process_image(self, file_path):
-        global min_maxc
-        global min_maxr
-        global image_obj
-        global angle_threshold
-
-        angle_threshold = 10
-        # Only consider jpg and jpeg for now
-        image_obj = io.imread(file_path, as_gray=True)
-
-        # Find width (in pixels) of the current image
-        width = len(image_obj[0])
-
-        # Use width to calculate the min size (in pixels) a LFA could be (this heavily depends on how the images are taken and will probably have to be reworked)
-        min_maxc = (int)(width / 40)
-        min_maxr = (int)(min_maxc * 20)
-
-        # Make a list for the test strip regions within the image
-        test_strips = []
-        detect_lateral_flow_tests(image_obj, test_strips)
-        test_strips = remove_outliers(test_strips)
-
-        # Go though test strips and make a new list of images of just the test strips
-        test_strip_images = []
-        for test in test_strips:
-            minr, minc, maxr, maxc = test.bbox
-            # Adjust indecies so that they are always in the bounds of the image
-            maxr, maxc = min(max(maxr, minr + min_maxr), len(image_obj)), min(max(maxc, minc + min_maxc), len(image_obj[0]))
-            test_strip_images.append([minr, maxr, minc, maxc])
-
-        # Run image_analysis funciton
-        self.analyze_test_strips(test_strip_images)
-
-        self.current_index = 0
-
-        # Display results
-        # self.show_result()
-
-    def analyze_test_strips(self, test_strip_images):
-        for test_strip in test_strip_images:
-            minr, maxr, minc, maxc = test_strip[0], test_strip[1], test_strip[2], test_strip[3]
-            image = image_obj[minr:maxr, minc:maxc]
-            image_display_width = self.window_width // 4
-            image_display_height = self.window_height - 200
-
-            image_display_ratio = min(image_display_width / image.shape[1], image_display_height / image.shape[0])
-            display_width = int(image.shape[1] * image_display_ratio)
-            display_height = int(image.shape[0] * image_display_ratio)
-
-            result_image = np.uint8(image)
-            result_image = ImageTk.PhotoImage(image=Image.fromarray(result_image).resize((display_width, display_height)))
+        self.image_path = filedialog.askopenfilename(filetypes=[("Image files", "*.jpg;*.jpeg;*.png")])
+        if self.image_path:
+            self.original_image = cv2.imread(self.image_path)
+            self.cropped_images = detect_lateral_flow_tests(self.original_image)
+            self.current_region = 0
+            self.selected_region = None
             
-            canvas = tk.Canvas(self.window, width = display_width, height = display_height, borderwidth=0, highlightthickness=0)
-            canvas.pack(expand=True)
-            canvas.create_image(0, 0, image=result_image, anchor=tk.NW)
-            self.selection_obj = SelectionObject(canvas, self.SELECT_OPTS)
-
-            def on_drag(start, end, **kwarg):
-                self.selection_obj.update(start, end)
-
-            self.posn_tracker = MousePositionTracker(canvas)
-            self.posn_tracker.autodraw(command=on_drag)
-
-    def show_result(self):
-        result_image = self.results[self.current_index][0]
-        result_array = self.results[self.current_index][1]
-        result_params = self.results[self.current_index][2]
-
-        image_display_width = self.window_width // 4
-        image_display_height = self.window_height - 200
-
-        image_display_ratio = min(image_display_width / result_image.shape[1], image_display_height / result_image.shape[0])
-        display_width = int(result_image.shape[1] * image_display_ratio)
-        display_height = int(result_image.shape[0] * image_display_ratio)
-
-        result_image = np.uint8(result_image)
-        result_image = ImageTk.PhotoImage(image=Image.fromarray(result_image).resize((display_width, display_height)))
-
-        self.image_label.configure(image=result_image)
-        self.image_label.image = result_image
-
-        self.plot_label.pack_forget()
-        self.plot_label = tk.Label(self.window)
-        self.plot_label.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        if len(result_params) == 2:
-            # Get parameters from result_params
-            start_index = result_params[0][0]
-            end_index = result_params[0][1]
-            area = result_params[0][2]
-
-            second_start_index = result_params[1][0]
-            second_end_index = result_params[1][1]
-            second_area = result_params[1][2]
-
-            fig = plt.figure(figsize=(6, 4))
-            ax = fig.add_subplot(111)
-
-            ax.plot(result_array, label='Original Array')
-            ax.scatter(start_index, result_array[start_index], color='red', label='Start Index (First Peak)')
-            ax.scatter(end_index, result_array[end_index], color='green', label='End Index (First Peak)')
-            ax.plot([start_index, end_index], [result_array[start_index], result_array[end_index]], 'k--',
-                    label='Diagonal Line (First Peak)')
-
-            ax.scatter(second_start_index, result_array[second_start_index], color='purple',
-                        label='Start Index (Second Peak)')
-            ax.scatter(second_end_index, result_array[second_end_index], color='orange',
-                        label='End Index (Second Peak)')
-            ax.plot([second_start_index, second_end_index],
-                    [result_array[second_start_index], result_array[second_end_index]], 'k--',
-                    label='Diagonal Line (Second Peak)')
-            ax.annotate(f'Area (Peak {1}): {area:.2f}', xy=(start_index, result_array[start_index]),
-                        xytext=(start_index, result_array[start_index] + 1), arrowprops=dict(arrowstyle='->'))
-            ax.annotate(f'Area (Peak {2}): {second_area:.2f}', xy=(second_start_index, result_array[second_start_index]),
-                        xytext=(second_start_index, result_array[second_start_index] + 1), arrowprops=dict(arrowstyle='->'))
+            self.update_image()
             
-            ax.set_xlabel('Index')
-            ax.set_ylabel('Value')
-            ax.set_title('Array Analysis')
-            ax.legend()
+            # Enable buttons
+            self.button_previous.config(state=tk.NORMAL)
+            self.button_next.config(state=tk.NORMAL)
+            self.button_choose_region.config(state=tk.NORMAL)
+            self.button_analyze_plot.config(state=tk.DISABLED)
+            self.button_download.config(state=tk.DISABLED)
 
-        canvas = FigureCanvasTkAgg(fig, master=self.plot_label)
-        canvas.draw()
-        canvas_widget = canvas.get_tk_widget()
-        canvas_widget.pack(fill=tk.BOTH, expand=True)
-        plt.close(fig)
 
-        self.window.update_idletasks()
+    def update_image(self):
+        if self.original_image is not None:
+            region = self.cropped_images[self.current_region] if self.cropped_images else self.original_image
+            image = Image.fromarray(cv2.cvtColor(region, cv2.COLOR_BGR2RGB))
+            image = self.resize_image(image)
+            self.display_image(image)
+
+    def resize_image(self, image):
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        image.thumbnail((screen_width, screen_height), Image.ANTIALIAS)
+        return image
     
-    def show_previous(self):
-        if self.current_index > 0:
-            self.current_index -= 1
-            self.show_result()
+    def display_image(self, image):
+        self.canvas.delete("all")
+        photo = ImageTk.PhotoImage(image)
+        self.canvas.create_image(0, 0, image=photo, anchor=tk.NW)
+        self.canvas.image = photo
+
+    # def process_image(self, file_path):
+    #     global min_maxc
+    #     global min_maxr
+    #     global image_obj
+    #     global angle_threshold
+
+    #     angle_threshold = 10
+    #     # Only consider jpg and jpeg for now
+    #     image_obj = io.imread(file_path, as_gray=True)
+
+    #     # Find width (in pixels) of the current image
+    #     width = len(image_obj[0])
+
+    #     # Use width to calculate the min size (in pixels) a LFA could be (this heavily depends on how the images are taken and will probably have to be reworked)
+    #     min_maxc = (int)(width / 40)
+    #     min_maxr = (int)(min_maxc * 20)
+
+    #     # Make a list for the test strip regions within the image
+    #     test_strips = []
+    #     detect_lateral_flow_tests(image_obj, test_strips)
+    #     test_strips = remove_outliers(test_strips)
+
+    #     # Go though test strips and make a new list of images of just the test strips
+    #     test_strip_images = []
+    #     for test in test_strips:
+    #         minr, minc, maxr, maxc = test.bbox
+    #         # Adjust indecies so that they are always in the bounds of the image
+    #         maxr, maxc = min(max(maxr, minr + min_maxr), len(image_obj)), min(max(maxc, minc + min_maxc), len(image_obj[0]))
+    #         test_strip_images.append([minr, maxr, minc, maxc])
+
+    #     # Run image_analysis funciton
+
+    #     self.current_index = 0
+
+    #     # Display results
+    #     self.show_images(test_strip_images)
     
-    def show_next(self):
-        if self.current_index < len(self.results) - 1:
-            self.current_index += 1
-            self.show_result()
-
-    def run(self):
-        # Start the window's main loop
-        self.window.mainloop()
-
-class MousePositionTracker(tk.Frame):
-    """ Tkinter Canvas mouse position widget. """
-
-    def __init__(self, canvas):
-        self.canvas = canvas
-        self.canv_width = self.canvas.cget('width')
-        self.canv_height = self.canvas.cget('height')
-        self.reset()
-
-        # Create canvas cross-hair lines.
-        xhair_opts = dict(dash=(3, 2), fill='white', state=tk.HIDDEN)
-        self.lines = (self.canvas.create_line(0, 0, 0, self.canv_height, **xhair_opts),
-                      self.canvas.create_line(0, 0, self.canv_width,  0, **xhair_opts))
-
-    def cur_selection(self):
-        return (self.start, self.end)
-
-    def begin(self, event):
-        self.hide()
-        self.start = (event.x, event.y)  # Remember position (no drawing).
-
-    def update(self, event):
-        self.end = (event.x, event.y)
-        self._update(event)
-        self._command(self.start, (event.x, event.y))  # User callback.
-
-    def _update(self, event):
-        # Update cross-hair lines.
-        self.canvas.coords(self.lines[0], event.x, 0, event.x, self.canv_height)
-        self.canvas.coords(self.lines[1], 0, event.y, self.canv_width, event.y)
-        self.show()
-
-    def reset(self):
-        self.start = self.end = None
-
-    def hide(self):
-        self.canvas.itemconfigure(self.lines[0], state=tk.HIDDEN)
-        self.canvas.itemconfigure(self.lines[1], state=tk.HIDDEN)
-
-    def show(self):
-        self.canvas.itemconfigure(self.lines[0], state=tk.NORMAL)
-        self.canvas.itemconfigure(self.lines[1], state=tk.NORMAL)
-
-    def autodraw(self, command=lambda *args: None):
-        """Setup automatic drawing; supports command option"""
-        self.reset()
-        self._command = command
-        self.canvas.bind("<Button-1>", self.begin)
-        self.canvas.bind("<B1-Motion>", self.update)
-        self.canvas.bind("<ButtonRelease-1>", self.quit)
-
-    def quit(self, event):
-        self.hide()  # Hide cross-hairs.
-        self.reset()
+    def analyze_plot(self):
+        if self.original_image is not None:
+            if self.selected_region is not None:
+                # Perform analysis on the selected region
+                x, y, w, h = self.selected_region
+                region = self.cropped_images[self.current_region][y:y + h, x:x + w]
+            else:
+                region = self.cropped_images[self.current_region]
+            # Perform analysis function on the region
+            self.analyzed_data = image_analysis(region)  # Replace with your own analysis function
+            
+            # Show analyzed data
+            self.display_analyzed_data()
+            
+            # Enable buttons
+            self.button_download.config(state=tk.NORMAL)
 
 
-class SelectionObject:
-    """ Widget to display a rectangular area on given canvas defined by two points
-        representing its diagonal.
-    """
-    def __init__(self, canvas, select_opts):
-        # Create attributes needed to display selection.
-        self.canvas = canvas
-        self.select_opts1 = select_opts
-        self.width = self.canvas.cget('width')
-        self.height = self.canvas.cget('height')
 
-        # Options for areas outside rectanglar selection.
-        select_opts1 = self.select_opts1.copy()  # Avoid modifying passed argument.
-        select_opts1.update(state=tk.HIDDEN)  # Hide initially.
-        # Separate options for area inside rectanglar selection.
-        select_opts2 = dict(dash=(2, 2), fill='', outline='white', state=tk.HIDDEN)
+    # def show_result(self):
+    #     result_image = self.results[self.current_index][0]
+    #     result_array = self.results[self.current_index][1]
+    #     result_params = self.results[self.current_index][2]
 
-        # Initial extrema of inner and outer rectangles.
-        imin_x, imin_y,  imax_x, imax_y = 0, 0,  1, 1
-        omin_x, omin_y,  omax_x, omax_y = 0, 0,  self.width, self.height
+    #     image_display_width = self.window_width // 4
+    #     image_display_height = self.window_height - 200
 
-        self.rects = (
-            # Area *outside* selection (inner) rectangle.
-            self.canvas.create_rectangle(omin_x, omin_y,  omax_x, imin_y, **select_opts1),
-            self.canvas.create_rectangle(omin_x, imin_y,  imin_x, imax_y, **select_opts1),
-            self.canvas.create_rectangle(imax_x, imin_y,  omax_x, imax_y, **select_opts1),
-            self.canvas.create_rectangle(omin_x, imax_y,  omax_x, omax_y, **select_opts1),
-            # Inner rectangle.
-            self.canvas.create_rectangle(imin_x, imin_y,  imax_x, imax_y, **select_opts2)
-        )
+    #     image_display_ratio = min(image_display_width / result_image.shape[1], image_display_height / result_image.shape[0])
+    #     display_width = int(result_image.shape[1] * image_display_ratio)
+    #     display_height = int(result_image.shape[0] * image_display_ratio)
 
-    def update(self, start, end):
-        # Current extrema of inner and outer rectangles.
-        imin_x, imin_y,  imax_x, imax_y = self._get_coords(start, end)
-        omin_x, omin_y,  omax_x, omax_y = 0, 0,  self.width, self.height
+    #     result_image = np.uint8(result_image)
+    #     result_image = ImageTk.PhotoImage(image=Image.fromarray(result_image).resize((display_width, display_height)))
 
-        # Update coords of all rectangles based on these extrema.
-        self.canvas.coords(self.rects[0], omin_x, omin_y,  omax_x, imin_y),
-        self.canvas.coords(self.rects[1], omin_x, imin_y,  imin_x, imax_y),
-        self.canvas.coords(self.rects[2], imax_x, imin_y,  omax_x, imax_y),
-        self.canvas.coords(self.rects[3], omin_x, imax_y,  omax_x, omax_y),
-        self.canvas.coords(self.rects[4], imin_x, imin_y,  imax_x, imax_y),
+    #     self.image_label.configure(image=result_image)
+    #     self.image_label.image = result_image
 
-        for rect in self.rects:  # Make sure all are now visible.
-            self.canvas.itemconfigure(rect, state=tk.NORMAL)
+    #     self.plot_label.pack_forget()
+    #     self.plot_label = tk.Label(self.window)
+    #     self.plot_label.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-    def _get_coords(self, start, end):
-        """ Determine coords of a polygon defined by the start and
-            end points one of the diagonals of a rectangular area.
-        """
-        return (min((start[0], end[0])), min((start[1], end[1])),
-                max((start[0], end[0])), max((start[1], end[1])))
+    #     if len(result_params) == 2:
+    #         # Get parameters from result_params
 
-    def hide(self):
-        for rect in self.rects:
-            self.canvas.itemconfigure(rect, state=tk.HIDDEN)
+    #     canvas = FigureCanvasTkAgg(fig, master=self.plot_label)
+    #     canvas.draw()
+    #     canvas_widget = canvas.get_tk_widget()
+    #     canvas_widget.pack(fill=tk.BOTH, expand=True)
+    #     plt.close(fig)
+
+    #     self.window.update_idletasks()
+    
+    def show_previous_region(self):
+        self.current_region = (self.current_region - 1) % len(self.cropped_images)
+        self.update_image()
+    
+    def show_next_region(self):
+        self.current_region = (self.current_region + 1) % len(self.cropped_images)
+        self.update_image()
+
+    def choose_region(self):
+        if self.original_image is not None:
+            if self.cropped_images is not None:
+                region = cv2.selectROI(self.cropped_images[self.current_region])
+            else:
+                region = cv2.selectROI(self.original_image)
+            self.selected_region = region
+            x, y, w, h = region
+            cv2.rectangle(self.cropped_images[self.current_region], (x, y), (x + w, y + h), (0, 255, 0), 2)
+            self.update_image()
+            
+            # Disable/Enable buttons
+            self.button_choose_region.config(state=tk.DISABLED)
+            self.button_analyze_plot.config(state=tk.NORMAL)
+            self.button_download.config(state=tk.DISABLED)
+    
+    def download_data(self):
+        if self.analyzed_data is not None:
+            file_path = filedialog.asksaveasfilename(defaultextension='.csv')
+            if file_path:
+                with open(file_path, 'w', newline='') as csvfile:
+                    writer = csv.writer(csvfile)
+                    writer.writerow(['Data'])
+                    for data_row in self.analyzed_data:
+                        writer.writerow([data_row])
+    
+    def close(self):
+        self.root.destroy()
 
 def test_function():
     global min_maxr, min_maxc
@@ -587,5 +500,40 @@ def test_function():
 
     result = image_analysis(test_strip_images)
 
-gui = MyGUI()
-gui.run()
+root = tk.Tk()
+gui = MyGUI(root)
+root.mainloop()
+
+# start_index = result_params[0][0]
+#             end_index = result_params[0][1]
+#             area = result_params[0][2]
+
+#             second_start_index = result_params[1][0]
+#             second_end_index = result_params[1][1]
+#             second_area = result_params[1][2]
+
+#             fig = plt.figure(figsize=(6, 4))
+#             ax = fig.add_subplot(111)
+
+#             ax.plot(result_array, label='Original Array')
+#             ax.scatter(start_index, result_array[start_index], color='red', label='Start Index (First Peak)')
+#             ax.scatter(end_index, result_array[end_index], color='green', label='End Index (First Peak)')
+#             ax.plot([start_index, end_index], [result_array[start_index], result_array[end_index]], 'k--',
+#                     label='Diagonal Line (First Peak)')
+
+#             ax.scatter(second_start_index, result_array[second_start_index], color='purple',
+#                         label='Start Index (Second Peak)')
+#             ax.scatter(second_end_index, result_array[second_end_index], color='orange',
+#                         label='End Index (Second Peak)')
+#             ax.plot([second_start_index, second_end_index],
+#                     [result_array[second_start_index], result_array[second_end_index]], 'k--',
+#                     label='Diagonal Line (Second Peak)')
+#             ax.annotate(f'Area (Peak {1}): {area:.2f}', xy=(start_index, result_array[start_index]),
+#                         xytext=(start_index, result_array[start_index] + 1), arrowprops=dict(arrowstyle='->'))
+#             ax.annotate(f'Area (Peak {2}): {second_area:.2f}', xy=(second_start_index, result_array[second_start_index]),
+#                         xytext=(second_start_index, result_array[second_start_index] + 1), arrowprops=dict(arrowstyle='->'))
+            
+#             ax.set_xlabel('Index')
+#             ax.set_ylabel('Value')
+#             ax.set_title('Array Analysis')
+#             ax.legend()
