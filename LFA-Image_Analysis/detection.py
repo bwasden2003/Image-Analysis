@@ -71,7 +71,7 @@ def detect_lateral_flow_tests(image, line_length = 10):
     lfa_images = []
     for region in lst:
         minr, maxr, minc, maxc = region[0], region[1], region[2], region[3]
-        lfa_image = image_copy[minr:maxr, minc:maxc]
+        lfa_image = image[minr:maxr, minc:maxc]
         lfa_images.append(lfa_image)
     return lfa_images
 
@@ -233,6 +233,7 @@ class MyGUI:
         self.selected_profile = None
         self.selected_plot_img = None
         self.output_plot_img = None
+        self.output_results = None
         
         open_frame = tk.Frame(self.root)
         open_frame.pack(side=tk.TOP, padx=10, pady=10)
@@ -269,6 +270,9 @@ class MyGUI:
 
         self.plot_canvas = tk.Canvas(self.root)
         self.plot_canvas.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        self.output_results = tk.LabelFrame(self.plot_canvas)
+        self.output_results.pack()
 
         self.root.protocol("WM_DELETE_WINDOW", self.close)
     
@@ -378,7 +382,7 @@ class MyGUI:
                 region = self.cropped_images[self.current_region]
             # Perform analysis function on the region
             # Returns [profile, [(start, end, area), ...]]
-            self.analyzed_data = image_analysis(region, selected)  # Replace with your own analysis function
+            self.analyzed_data = image_analysis(region, selected)
             # Show analyzed data
             self.display_analyzed_data()
             
@@ -392,7 +396,8 @@ class MyGUI:
 
             fig, ax = plt.subplots(figsize=(6, 6))
             ax.plot(self.selected_profile, label='Original Array')
-
+            area = 0
+            second_area = 0
             if len(params) > 1:
                 first_params = params[0]
                 start_index = first_params[0]
@@ -416,9 +421,9 @@ class MyGUI:
                 ax.plot([second_start_index, second_end_index],
                         [self.selected_profile[second_start_index], self.selected_profile[second_end_index]], 'k--',
                         label='Diagonal Line (Second Peak)')
-                ax.annotate(f'Area (Peak {1}): {area:.2f}', xy=(start_index, self.selected_profile[start_index]),
+                ax.annotate(f'Peak {1}', xy=(start_index, self.selected_profile[start_index]),
                             xytext=(start_index, self.selected_profile[start_index] + 1), arrowprops=dict(arrowstyle='->'))
-                ax.annotate(f'Area (Peak {2}): {second_area:.2f}', xy=(second_start_index, self.selected_profile[second_start_index]),
+                ax.annotate(f'Peak {2}', xy=(second_start_index, self.selected_profile[second_start_index]),
                             xytext=(second_start_index, self.selected_profile[second_start_index] + 1), arrowprops=dict(arrowstyle='->'))
             else:
                 first_params = params[0]
@@ -430,7 +435,7 @@ class MyGUI:
                 ax.scatter(end_index, self.selected_profile[end_index], color='green', label='End Index (First Peak)')
                 ax.plot([start_index, end_index], [self.selected_profile[start_index], self.selected_profile[end_index]], 'k--',
                         label='Diagonal Line (First Peak)')
-                ax.annotate(f'Area (Peak {1}): {area:.2f}', xy=(start_index, self.selected_profile[start_index]),
+                ax.annotate(f'Peak {1}', xy=(start_index, self.selected_profile[start_index]),
                             xytext=(start_index, self.selected_profile[start_index] + 1), arrowprops=dict(arrowstyle='->'))
             
             ax.set_xlabel('Index')
@@ -445,6 +450,14 @@ class MyGUI:
             self.plot_canvas.delete("all")
             self.plot_canvas.create_image(canvas_width // 2, canvas_height // 2, image=self.selected_plot_img)
             self.plot_canvas.image = self.selected_plot_img
+            for label in self.output_results.winfo_children():
+                label.destroy()
+            label1 = tk.Label(self.output_results, text="Area Peak 1: " + str(round(area, 2)))
+            label1.pack()
+            if second_area != 0:
+                label2 = tk.Label(self.output_results, text="Area Peak 2: " + str(round(second_area, 2)))
+                label2.pack()
+            self.output_results.pack(side=tk.BOTTOM, pady=20)
 
     def plot_to_image(self, plot):
         # Save the plot as a temporary image file
@@ -484,11 +497,12 @@ class MyGUI:
     def choose_region(self):
         self.button_choose_region.config(state=tk.DISABLED)
         if self.original_image is not None:
+            cv2.namedWindow("Select Region", cv2.WINDOW_NORMAL)
             if self.cropped_images is not None:
                 region = cv2.selectROI("Select Region", self.cropped_images[self.current_region])
             else:
                 region = cv2.selectROI(self.original_image)
-            self.selected_region = region
+            self.selected_region = region if region != (0, 0, 0, 0) else None
             cv2.destroyWindow("Select Region")
             self.update_image()
             
