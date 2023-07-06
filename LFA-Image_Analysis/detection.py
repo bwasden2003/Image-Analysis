@@ -4,11 +4,8 @@ import numpy as np
 import pandas as pd
 
 import cv2
-import csv
-import ctypes
 
 import platform
-import threading
 
 import skimage as sk
 from skimage import io, color, filters, restoration
@@ -235,6 +232,7 @@ class MyGUI:
         self.select_window_open = False
         self.selected_profile = None
         self.selected_plot_img = None
+        self.output_plot_img = None
         
         open_frame = tk.Frame(self.root)
         open_frame.pack(side=tk.TOP, padx=10, pady=10)
@@ -454,6 +452,7 @@ class MyGUI:
         plot.savefig(temp_file)
 
         # Load the saved image file as a Tkinter-compatible image
+        self.output_plot_img = io.imread(temp_file)
         plot_img = ImageTk.PhotoImage(Image.open(temp_file))
 
         # Clean up the temporary file
@@ -518,96 +517,40 @@ class MyGUI:
                 workbook = writer.book
                 worksheet = writer.sheets['Sheet1']
 
-                cv2.imwrite(r'images/temp1.png', self.original_image)
+                cv2.imwrite(r'temp1.png', self.original_image)
 
-                cv2.imwrite(r'images/temp2.png', self.cropped_images[self.current_region])
+                cv2.imwrite(r'temp2.png', self.cropped_images[self.current_region])
 
-                worksheet.insert_image('D3', 'images/temp1.png')
-                worksheet.insert_image('M3', 'images/temp2.png')
+                cv2.imwrite(r'temp3.png', self.output_plot_img)
+
+                worksheet.insert_image('D3', 'temp1.png')
+                worksheet.insert_image('M3', 'temp2.png')
+                worksheet.insert_image('O3', 'temp3.png')
                 writer.book.close()
 
                 if platform.system() == "Windows":
                     # On Windows, the file might not be immediately available for deletion
-                    self.root.after(100, lambda: self.delete_temp_file('images/temp1.png'))
+                    self.root.after(100, lambda: self.delete_temp_file('temp1.png'))
                 else:
-                    self.delete_temp_file('images/temp1.png')
+                    self.delete_temp_file('temp1.png')
 
                 if platform.system() == "Windows":
                     # On Windows, the file might not be immediately available for deletion
-                    self.root.after(100, lambda: self.delete_temp_file('images/temp2.png'))
+                    self.root.after(100, lambda: self.delete_temp_file('temp2.png'))
                 else:
-                    self.delete_temp_file('images/temp2.png')
+                    self.delete_temp_file('temp2.png')
+
+                if platform.system() == "Windows":
+                    # On Windows, the file might not be immediately available for deletion
+                    self.root.after(100, lambda: self.delete_temp_file('temp3.png'))
+                else:
+                    self.delete_temp_file('temp3.png')
+
                 print(f"Profile data saved to {file_path}")
     
     def close(self):
         self.root.destroy()
-
-# def test_function():
-#     global min_maxr, min_maxc
-#     global angle_threshold
-#     global file_path
-#     global image_obj
-#     file_path = "images/image1.jpg"
-#     angle_threshold = 10
-#     # Only consider jpg and jpeg for now
-#     image_obj = io.imread(file_path, as_gray=True)
-
-#     # Find width (in pixels) of the current image
-#     width = len(image_obj[0])
-
-#     # Use width to calculate the min size (in pixels) a LFA could be (this heavily depends on how the images are taken and will probably have to be reworked)
-#     min_maxc = (int)(width / 40)
-#     min_maxr = (int)(min_maxc * 20)
-
-#     # Make a list for the test strip regions within the image
-#     test_strips = []
-#     detect_lateral_flow_tests(image_obj, test_strips)
-#     test_strips = remove_outliers(test_strips)
-
-#     # Go though test strips and make a new list of images of just the test strips
-#     test_strip_images = []
-#     for test in test_strips:
-#         minr, minc, maxr, maxc = test.bbox
-#         # Adjust indecies so that they are always in the bounds of the image
-#         maxr, maxc = min(max(maxr, minr + min_maxr), len(image_obj)), min(max(maxc, minc + min_maxc), len(image_obj[0]))
-#         test_strip_images.append([minr, maxr, minc, maxc])
-
-#     result = image_analysis(test_strip_images)
-
+        
 root = tk.Tk()
 gui = MyGUI(root)
 root.mainloop()
-
-#             start_index = result_params[0][0]
-#             end_index = result_params[0][1]
-#             area = result_params[0][2]
-
-#             second_start_index = result_params[1][0]
-#             second_end_index = result_params[1][1]
-#             second_area = result_params[1][2]
-
-#             fig = plt.figure(figsize=(6, 4))
-#             ax = fig.add_subplot(111)
-
-#             ax.plot(result_array, label='Original Array')
-#             ax.scatter(start_index, result_array[start_index], color='red', label='Start Index (First Peak)')
-#             ax.scatter(end_index, result_array[end_index], color='green', label='End Index (First Peak)')
-#             ax.plot([start_index, end_index], [result_array[start_index], result_array[end_index]], 'k--',
-#                     label='Diagonal Line (First Peak)')
-
-#             ax.scatter(second_start_index, result_array[second_start_index], color='purple',
-#                         label='Start Index (Second Peak)')
-#             ax.scatter(second_end_index, result_array[second_end_index], color='orange',
-#                         label='End Index (Second Peak)')
-#             ax.plot([second_start_index, second_end_index],
-#                     [result_array[second_start_index], result_array[second_end_index]], 'k--',
-#                     label='Diagonal Line (Second Peak)')
-#             ax.annotate(f'Area (Peak {1}): {area:.2f}', xy=(start_index, result_array[start_index]),
-#                         xytext=(start_index, result_array[start_index] + 1), arrowprops=dict(arrowstyle='->'))
-#             ax.annotate(f'Area (Peak {2}): {second_area:.2f}', xy=(second_start_index, result_array[second_start_index]),
-#                         xytext=(second_start_index, result_array[second_start_index] + 1), arrowprops=dict(arrowstyle='->'))
-            
-#             ax.set_xlabel('Index')
-#             ax.set_ylabel('Value')
-#             ax.set_title('Array Analysis')
-#             ax.legend()
