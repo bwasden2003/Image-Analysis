@@ -192,10 +192,10 @@ def image_analysis(region, selected):
     image_copy = np.copy(region)
     height, width = image_copy.shape
 
-    # if not selected:
-    #     cropped_image = image_copy[int(height * .2):int(height * .6), int(width * .4):int(width * .6)]
-    # else:
-    cropped_image = image_copy
+    if not selected:
+        cropped_image = image_copy[int(height * .3):int(height * .7), int(width * .3):int(width * .7)]
+    else:
+        cropped_image = image_copy
     profile = np.nanmean(cropped_image, axis=1)
 
     start_index, end_index, area = analyze_peaks(profile)
@@ -471,9 +471,9 @@ class MyGUI:
                 ax.annotate(f'Peak {1}', xy=(start_index, self.selected_profile[start_index]),
                             xytext=(start_index, self.selected_profile[start_index] + 1), arrowprops=dict(arrowstyle='->'))
 
-            ax.set_xlabel('Index')
-            ax.set_ylabel('Value')
-            ax.set_title('Array Analysis')
+            ax.set_xlabel('Distance (Top to Bottom)')
+            ax.set_ylabel('Intensity')
+            ax.set_title('LFA Plot Analysis')
             # Convert the plot to an image
             self.selected_plot_img = self.plot_to_image(fig)
 
@@ -493,7 +493,7 @@ class MyGUI:
                 label2 = tk.Label(
                     self.output_results, text="Area Peak 2: " + str(round(second_area, 2)))
                 label2.pack()
-            self.output_results.pack(side=tk.BOTTOM, pady=20)
+            self.output_results.pack(side=tk.BOTTOM, pady=50)
 
     def plot_to_image(self, plot):
         # Save the plot as a temporary image file
