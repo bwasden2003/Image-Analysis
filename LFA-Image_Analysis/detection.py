@@ -193,19 +193,28 @@ def image_analysis(region, selected):
     height, width = image_copy.shape
 
     if not selected:
-        cropped_image = image_copy[int(height * .3):int(height * .7), int(width * .3):int(width * .7)]
+        cropped_image = image_copy[int(height * .25):int(height * .6), int(width * .3):int(width * .7)]
     else:
         cropped_image = image_copy
     profile = np.nanmean(cropped_image, axis=1)
 
     start_index, end_index, area = analyze_peaks(profile)
-    second_peak_data = profile[end_index + 1:]
+    second_peak_data = None
+    next_peak_data = profile[end_index + 1:]
+    # Check to find test line if control line had largest signal
+    prev_peak_data = profile[:start_index - 1]
+    prev = False
+    if len(prev_peak_data) > 1 and next_peak_data[np.argmax(next_peak_data)] < prev_peak_data[np.argmax(prev_peak_data)]:
+        second_peak_data = prev_peak_data
+        prev = True
+    else:
+        second_peak_data = next_peak_data
     if len(second_peak_data) > 1:
         second_start_index, second_end_index, second_area = analyze_peaks(
             second_peak_data)
-        second_start_index += end_index + 1
-        second_end_index += end_index + 1
-
+        if prev == False:
+            second_start_index += end_index + 1
+            second_end_index += end_index + 1
         return [profile, [(start_index, end_index, area), (second_start_index, second_end_index, second_area)]]
     else:
         return [profile, [(start_index, end_index, area)]]
