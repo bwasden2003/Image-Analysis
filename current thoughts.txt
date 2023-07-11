@@ -1,11 +1,8 @@
-use range of (.65% to 4%)
-percentile 80-99
-image1
-works, 80-99, clip_limit = 0.05
-80-92 works for all but 4
+TODO:
+save area values in excel spreadsheet
+area values appear below graph
 
-image2
-works with lower percentile upper bound 80 - 97
+invert image (background white, strips dark)
+make it work with different colors (ex. able to select blue and analyze only for blue intensity)
 
-image3
-works
+raspberry pi hookup?
