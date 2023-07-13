@@ -29,13 +29,25 @@ file_path = ""
 
 
 def detect_lateral_flow_tests(image, line_length=10):
-    # Increase gammma of the image
-    image_copy = np.copy(image)
-    image_copy = sk.exposure.adjust_gamma(image_copy, 0.4)
+    if image.ndim == 2:
+        # Increase gamma of the 2D grayscale image
+        image_gray = sk.color.rgb2gray(image)
+        image_copy = sk.exposure.adjust_gamma(image_gray, 0.4)
 
-    # Create a binary mask based on color thresholding
-    threshold = filters.threshold_otsu(image_copy)
-    threshold_image = image_copy > threshold
+        # Create a binary mask based on color thresholding
+        threshold = filters.threshold_otsu(image_copy)
+        threshold_image = image_copy > threshold
+    elif image.ndim == 3:
+        # Increase gamma of each channel in the 3D color image
+        image_gray = sk.color.rgb2gray(image)
+        image_copy = sk.exposure.adjust_gamma(image_gray, 0.4)
+
+        # Create a binary mask based on color thresholding
+        threshold = filters.threshold_otsu(image_copy)
+        threshold_image = image_copy > threshold
+    else:
+        raise ValueError("Invalid image dimensions. Only 2D and 3D images are supported.")
+
     edges = sk.feature.canny(threshold_image)
 
     # Perform Hough line detection
@@ -61,10 +73,12 @@ def detect_lateral_flow_tests(image, line_length=10):
         minr, minc, maxr, maxc = region.bbox
         maxr, maxc = max(maxr, minr + min_maxr), max(maxc, minc + min_maxc)
         # Calculate the mean color within the bounding box
-        mean_color = np.mean(image[minr:maxr, minc:maxc], axis=(0, 1))
-
+        if image.ndim == 2:
+            mean_color = np.mean(image[minr:maxr, minc:maxc])
+        else:
+            mean_color = np.mean(image[minr:maxr, minc:maxc, :], axis=(0, 1))
         # Check if the mean color is lighter than the background color and the region is big enough to qualify as a test strip
-        if mean_color > background_color and region.area >= 100:
+        if np.mean(mean_color) > np.mean(background_color) and region.area >= 100:
             # Draw a rectangle around the detected test
             if check_duplicate(minr, minc, maxr, maxc, lst):
                 straighten_region(copy_image, region, angles)
@@ -186,53 +200,59 @@ def detect_lines(image) -> list:
     return strips
 
 
-# Function needs to be reworked so that it takes in one image and returns one output plot
+
 def image_analysis(region, selected):
 
     image_copy = np.copy(region)
-    height, width = image_copy.shape
+    height, width, channels= image_copy.shape
 
     if not selected:
-        cropped_image = image_copy[int(height * .25):int(height * .6), int(width * .3):int(width * .7)]
+        cropped_image = image_copy[int(height * .25):int(height * .6), int(width * .3):int(width * .7), :]
     else:
         cropped_image = image_copy
-    profile = np.nanmean(cropped_image, axis=1)
+    profile = np.nanmean(cropped_image, axis=(1,2))
 
     start_index, end_index, area = analyze_peaks(profile)
     second_peak_data = None
-    next_peak_data = profile[end_index + 1:]
-    # Check to find test line if control line had largest signal
-    prev_peak_data = profile[:start_index - 1]
-    prev = False
-    if len(prev_peak_data) > 1 and next_peak_data[np.argmax(next_peak_data)] < prev_peak_data[np.argmax(prev_peak_data)]:
-        second_peak_data = prev_peak_data
-        prev = True
-    else:
-        second_peak_data = next_peak_data
-    if len(second_peak_data) > 1:
-        second_start_index, second_end_index, second_area = analyze_peaks(
-            second_peak_data)
-        if prev == False:
-            second_start_index += end_index + 1
-            second_end_index += end_index + 1
-        return [profile, [(start_index, end_index, area), (second_start_index, second_end_index, second_area)]]
-    else:
-        return [profile, [(start_index, end_index, area)]]
+    if start_index > 1 and end_index < len(profile) - 2:
+        prev_peak_data = profile[:start_index - 1]
+        next_peak_data = profile[end_index + 1:]
+        if len(prev_peak_data) > 1 and len(next_peak_data) > 1:
+            next_peak_argmax = np.argmax(next_peak_data)
+            prev_peak_argmax = np.argmax(prev_peak_data)
+            if next_peak_data[next_peak_argmax] < prev_peak_data[prev_peak_argmax]:
+                second_peak_data = prev_peak_data
+                prev = True
+            else:
+                second_peak_data = next_peak_data
+                prev = False
+            if len(second_peak_data) > 1:
+                second_start_index, second_end_index, second_area = analyze_peaks(second_peak_data)
+                if not prev:
+                    second_start_index += end_index + 1
+                    second_end_index += end_index + 1
+                if (second_start_index <= start_index and second_end_index > start_index) or (second_start_index <= end_index and second_end_index > end_index) or (second_start_index >= start_index and second_end_index <= end_index):
+                    return [profile, [(start_index, end_index, area)]]
+                else:
+                    return [profile, [(start_index, end_index, area), (second_start_index, second_end_index, second_area)]]
+
+    return [profile, [(start_index, end_index, area)]]
 
 
-def analyze_peaks(profile):
+def analyze_peaks(profile, window_size = 25):
     peak_index = np.argmax(profile)
+    window_start = max(0, peak_index - window_size)
+    window_end = min(len(profile), peak_index + window_size + 1)
 
+    intensity_threshold = np.mean(profile[window_start:window_end])
     # Search backward to find the start index
     start_index = peak_index
-    while start_index > 0 and profile[start_index] >= profile[start_index - 1]:
+    while start_index > 0 and (np.all(profile[start_index] >= profile[start_index - 1]) or profile[start_index] > intensity_threshold):
         start_index -= 1
-
     # Search forward to find the end index
     end_index = peak_index
-    while end_index < len(profile) - 1 and profile[end_index] >= profile[end_index + 1]:
+    while end_index < len(profile) - 1 and (np.all(profile[end_index] >= profile[end_index + 1]) or profile[end_index] > intensity_threshold):
         end_index += 1
-
     # Create a line segment connecting start_index and end_index
     modified_array = np.copy(profile)
     modified_array[start_index:end_index + 1] = np.linspace(profile[start_index], profile[end_index],
@@ -352,8 +372,30 @@ class MyGUI:
         self.image_path = filedialog.askopenfilename(
             filetypes=[("Image files", "*.jpg *.jpeg *.png")])
         if self.image_path:
-            self.original_image = io.imread(self.image_path, as_gray=True)
+            image = cv2.imread(self.image_path)
+            # if image.mode == "P":
+            #     # Convert indexed image to RGBA
+            #     image = image.convert("RGBA")
+            # elif image.mode == "LA":
+            #     # Convert grayscale with alpha to RGBA
+            #     image = image.convert("RGBA")
+            #     alpha = image.split()[3]
+            #     image = image.convert("RGB")
+            #     image.putalpha(alpha)
+            # elif image.mode == "I":
+            #     image = image.convert("L")
 
+            # if image.mode == "RGBA":
+            #     # Create a white background image of the same size
+            #     background = Image.new("RGB", image.size, (255, 255, 255))
+
+            #     # Composite the image on the white background to handle transparency
+            #     # composed = Image.alpha_composite(background, image)
+
+            #     # Convert the composed image to RGB mode
+            #     image = image.convert("RGB")
+
+            self.original_image = image
             width = len(self.original_image[0])
             min_maxc = (int)(width / 40)
             min_maxr = (int)(min_maxc * 20)
@@ -381,14 +423,14 @@ class MyGUI:
             if self.selected_region is not None:
                 x, y, w, h = self.selected_region
                 cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+            image = Image.fromarray(image)
             image = self.resize_image(image)
             self.display_image(image)
 
     def resize_image(self, image):
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
-        image.thumbnail((screen_width, screen_height), Image.ANTIALIAS)
+        image.thumbnail((screen_width, screen_height))
         return image
 
     def display_image(self, image):
@@ -401,7 +443,7 @@ class MyGUI:
         display_height = int(img_height * scale)
 
         resized_image = image.resize(
-            (display_width, display_height), Image.ANTIALIAS)
+            (display_width, display_height))
         img_tk = ImageTk.PhotoImage(resized_image)
 
         self.image_canvas.delete("all")
