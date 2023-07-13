@@ -245,6 +245,7 @@ def analyze_peaks(profile):
 
 
 class MyGUI:
+    colors = ['red', 'green', 'blue']
     def __init__(self, root):
         self.root = root
         self.root.geometry(
@@ -261,6 +262,7 @@ class MyGUI:
         self.selected_plot_img = None
         self.output_plot_img = None
         self.output_results = None
+        self.selected_color = None
 
         open_frame = tk.Frame(self.root)
         open_frame.pack(side=tk.TOP, padx=10, pady=10)
