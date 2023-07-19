@@ -238,28 +238,74 @@ def image_analysis(region, selected):
 
     return [profile, [(start_index, end_index, area)]]
 
+def inverse_image_analysis(region, selected):
+    image_copy = np.copy(region)
+    height, width, channels= image_copy.shape
 
-def analyze_peaks(profile, window_size = 25):
-    peak_index = np.argmax(profile)
+    if not selected:
+        cropped_image = image_copy[int(height * .25):int(height * .6), int(width * .3):int(width * .7), :]
+    else:
+        cropped_image = image_copy
+    profile = np.nanmean(cropped_image, axis=(1,2))
+
+    start_index, end_index, area = analyze_peaks(profile, inverse=True)
+    second_peak_data = None
+    if start_index > 1 and end_index < len(profile) - 2:
+        prev_peak_data = profile[:start_index - 1]
+        next_peak_data = profile[end_index + 1:]
+        if len(prev_peak_data) > 1 and len(next_peak_data) > 1:
+            next_peak_argmin = np.argmin(next_peak_data)
+            prev_peak_argmin = np.argmin(prev_peak_data)
+            if next_peak_data[next_peak_argmin] > prev_peak_data[prev_peak_argmin]:
+                second_peak_data = prev_peak_data
+                prev = True
+            else:
+                second_peak_data = next_peak_data
+                prev = False
+            if len(second_peak_data) > 1:
+                second_start_index, second_end_index, second_area = analyze_peaks(second_peak_data, inverse=True)
+                if not prev:
+                    second_start_index += end_index + 1
+                    second_end_index += end_index + 1
+                if (second_start_index <= start_index and second_end_index > start_index) or (second_start_index <= end_index and second_end_index > end_index) or (second_start_index >= start_index and second_end_index <= end_index):
+                    return [profile, [(start_index, end_index, area)]]
+                else:
+                    return [profile, [(start_index, end_index, area), (second_start_index, second_end_index, second_area)]]
+
+    return [profile, [(start_index, end_index, area)]]
+
+def analyze_peaks(profile, inverse=False, window_size=25):
+    peak_index = np.argmax(profile) if not inverse else np.argmin(profile)
     window_start = max(0, peak_index - window_size)
     window_end = min(len(profile), peak_index + window_size + 1)
 
     intensity_threshold = np.mean(profile[window_start:window_end])
     # Search backward to find the start index
     start_index = peak_index
-    while start_index > 0 and (np.all(profile[start_index] >= profile[start_index - 1]) or profile[start_index] > intensity_threshold):
-        start_index -= 1
-    # Search forward to find the end index
-    end_index = peak_index
-    while end_index < len(profile) - 1 and (np.all(profile[end_index] >= profile[end_index + 1]) or profile[end_index] > intensity_threshold):
-        end_index += 1
+    if inverse:
+        while start_index > 0 and (np.all(profile[start_index] <= profile[start_index - 1]) or profile[start_index] < intensity_threshold):
+            start_index -= 1
+        # Search forward to find the end index
+        end_index = peak_index
+        while end_index < len(profile) - 1 and (np.all(profile[end_index] <= profile[end_index + 1]) or profile[end_index] < intensity_threshold):
+            end_index += 1
+    else: 
+        while start_index > 0 and (np.all(profile[start_index] >= profile[start_index - 1]) or profile[start_index] > intensity_threshold):
+            start_index -= 1
+        # Search forward to find the end index
+        end_index = peak_index
+        while end_index < len(profile) - 1 and (np.all(profile[end_index] >= profile[end_index + 1]) or profile[end_index] > intensity_threshold):
+            end_index += 1
     # Create a line segment connecting start_index and end_index
     modified_array = np.copy(profile)
     modified_array[start_index:end_index + 1] = np.linspace(profile[start_index], profile[end_index],
                                                             end_index - start_index + 1)
-
-    area = np.trapz(profile[start_index:end_index + 1]) - \
-        np.trapz(modified_array[start_index:end_index + 1])
+    if inverse:
+        area = np.trapz(modified_array[start_index:end_index + 1]) - \
+            np.trapz(profile[start_index:end_index + 1])
+    else:
+        area = np.trapz(profile[start_index:end_index + 1]) - \
+            np.trapz(modified_array[start_index:end_index + 1])
 
     return start_index, end_index, area
 
@@ -285,6 +331,7 @@ class MyGUI:
         self.num_tests = 0
         self.selected_color = None
         self.gamma_level = 1
+        self.invert = tk.BooleanVar()
 
         open_frame = tk.Frame(self.root, borderwidth=2, relief=tk.SOLID)
         open_frame.pack(side=tk.TOP, padx=10, pady=10)
@@ -334,6 +381,9 @@ class MyGUI:
     
         self.cur_region_label = tk.Label(info_frame, text=("Current region: " + str(self.current_region)), width = 20)
         self.cur_region_label.pack(side=tk.TOP)
+
+        self.checkbox_invert = tk.Checkbutton(info_frame, text="Invert Image", variable=self.invert, onvalue=True, offvalue=False, command=self.update_image)
+        self.checkbox_invert.pack()
 
         image_frame = tk.Frame(info_frame)
         image_frame.pack(fill=tk.BOTH, expand=True)
@@ -422,6 +472,8 @@ class MyGUI:
             if self.selected_region is not None:
                 x, y, w, h = self.selected_region
                 cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            if self.invert.get() == True:
+                image = sk.util.invert(image)
             image = Image.fromarray(sk.exposure.adjust_gamma(image, self.gamma_level))
             image = self.resize_image(image)
             self.display_image(image)
@@ -460,11 +512,15 @@ class MyGUI:
                 selected = True
             else:
                 region = self.cropped_images[self.current_region]
-                
+            
             region = sk.exposure.adjust_gamma(region, self.gamma_level)
-            # Perform analysis function on the region
+            if self.invert.get() == True:
+                region = sk.util.invert(region)
+                # Perform analysis function on the region
+                self.analyzed_data = inverse_image_analysis(region, selected)
+            else:
+                self.analyzed_data = image_analysis(region, selected)
             # Returns [profile, [(start, end, area), ...]]
-            self.analyzed_data = image_analysis(region, selected)
             # Show analyzed data
             self.display_analyzed_data()
 
