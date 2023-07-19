@@ -282,16 +282,18 @@ class MyGUI:
         self.selected_plot_img = None
         self.output_plot_img = None
         self.output_results = None
+        self.num_tests = 0
         self.selected_color = None
+        self.gamma_level = 1
 
-        open_frame = tk.Frame(self.root)
+        open_frame = tk.Frame(self.root, borderwidth=2, relief=tk.SOLID)
         open_frame.pack(side=tk.TOP, padx=10, pady=10)
 
         self.button_open = tk.Button(
             open_frame, text="Open Image", command=self.open_image)
         self.button_open.pack(anchor=tk.CENTER)
 
-        button_frame = tk.Frame(self.root)
+        button_frame = tk.Frame(self.root, borderwidth=2, relief=tk.SOLID)
         button_frame.pack(side=tk.TOP, padx=10, pady=10)
 
         self.button_previous = tk.Button(
@@ -301,6 +303,9 @@ class MyGUI:
         self.button_next = tk.Button(
             button_frame, text="Next", command=self.show_next_region)
         self.button_next.pack(side=tk.LEFT, padx=5)
+
+        self.button_choose_gamma = tk.Button(button_frame, text="Adjust Gamma", command=self.adjust_gamma)
+        self.button_choose_gamma.pack(side=tk.LEFT, padx=5)
 
         self.button_choose_region = tk.Button(
             button_frame, text="Choose Region", command=self.choose_region)
@@ -321,10 +326,22 @@ class MyGUI:
         self.button_download.pack(side=tk.LEFT, padx=5)
         self.button_download.config(state=tk.DISABLED)
 
-        self.image_canvas = tk.Canvas(self.root)
-        self.image_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        info_frame = tk.Frame(self.root, borderwidth=2, relief=tk.SOLID)
+        info_frame.pack(side=tk.LEFT, padx=10, pady=10, fill=tk.BOTH, expand=True)
 
-        self.plot_canvas = tk.Canvas(self.root)
+        self.num_regions_label = tk.Label(info_frame, text=("Number of regions: " + str(self.num_tests)), width = 20)
+        self.num_regions_label.pack(side=tk.TOP)
+    
+        self.cur_region_label = tk.Label(info_frame, text=("Current region: " + str(self.current_region)), width = 20)
+        self.cur_region_label.pack(side=tk.TOP)
+
+        image_frame = tk.Frame(info_frame)
+        image_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.image_canvas = tk.Canvas(image_frame)
+        self.image_canvas.pack(fill=tk.BOTH, expand=True)
+
+        self.plot_canvas = tk.Canvas(self.root, borderwidth=2, relief=tk.SOLID)
         self.plot_canvas.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
         self.output_results = tk.LabelFrame(self.plot_canvas)
@@ -373,27 +390,6 @@ class MyGUI:
             filetypes=[("Image files", "*.jpg *.jpeg *.png")])
         if self.image_path:
             image = cv2.imread(self.image_path)
-            # if image.mode == "P":
-            #     # Convert indexed image to RGBA
-            #     image = image.convert("RGBA")
-            # elif image.mode == "LA":
-            #     # Convert grayscale with alpha to RGBA
-            #     image = image.convert("RGBA")
-            #     alpha = image.split()[3]
-            #     image = image.convert("RGB")
-            #     image.putalpha(alpha)
-            # elif image.mode == "I":
-            #     image = image.convert("L")
-
-            # if image.mode == "RGBA":
-            #     # Create a white background image of the same size
-            #     background = Image.new("RGB", image.size, (255, 255, 255))
-
-            #     # Composite the image on the white background to handle transparency
-            #     # composed = Image.alpha_composite(background, image)
-
-            #     # Convert the composed image to RGB mode
-            #     image = image.convert("RGB")
 
             self.original_image = image
             width = len(self.original_image[0])
@@ -403,7 +399,10 @@ class MyGUI:
 
             self.cropped_images = detect_lateral_flow_tests(
                 self.original_image)
+            self.num_tests = len(self.cropped_images)
+            self.num_regions_label.configure(text=("Number of regions: " + str(self.num_tests)))
             self.current_region = 0
+            self.cur_region_label.configure(text=("Current region: " + str(self.current_region + 1)))
             self.selected_region = None
 
             self.update_image()
@@ -423,7 +422,7 @@ class MyGUI:
             if self.selected_region is not None:
                 x, y, w, h = self.selected_region
                 cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            image = Image.fromarray(image)
+            image = Image.fromarray(sk.exposure.adjust_gamma(image, self.gamma_level))
             image = self.resize_image(image)
             self.display_image(image)
 
@@ -461,6 +460,8 @@ class MyGUI:
                 selected = True
             else:
                 region = self.cropped_images[self.current_region]
+                
+            region = sk.exposure.adjust_gamma(region, self.gamma_level)
             # Perform analysis function on the region
             # Returns [profile, [(start, end, area), ...]]
             self.analyzed_data = image_analysis(region, selected)
@@ -575,15 +576,34 @@ class MyGUI:
     def show_previous_region(self):
         self.current_region = (self.current_region -
                                1) % len(self.cropped_images)
+        self.cur_region_label.configure(text=("Current region: " + str(self.current_region + 1)))
         self.selected_region = None
         self.update_image()
 
     def show_next_region(self):
         self.current_region = (self.current_region +
                                1) % len(self.cropped_images)
+        self.cur_region_label.configure(text=("Current region: " + str(self.current_region + 1)))
         self.selected_region = None
         self.update_image()
 
+    def adjust_gamma(self):
+        result = None
+        def save_result():
+            nonlocal result
+            self.gamma_level = slider.get() / 100
+            print("gamma level is " + str(self.gamma_level))
+            self.update_image()
+            window.destroy()
+        window = tk.Toplevel()
+        window.title("Adjust Gamma")
+        slider = tk.Scale(window, variable=tk.DoubleVar(), from_=0, to=200, orient=tk.HORIZONTAL, resolution=1)
+        slider.set(100)
+        button = tk.Button(window, text="Save", command=save_result)
+        slider.pack(padx=20, pady=10)
+        button.pack(pady=10)
+        window.mainloop()
+        
     def choose_region(self):
         self.button_choose_region.config(state=tk.DISABLED)
         if self.original_image is not None:
@@ -605,8 +625,11 @@ class MyGUI:
     def delete_region(self):
         if len(self.cropped_images) > 0:
             del self.cropped_images[self.current_region]
+            self.num_tests -= 1
+            self.num_regions_label.configure(text=("Number of regions: " + str(self.num_tests)))
             if self.current_region >= len(self.cropped_images):
                 self.current_region = len(self.cropped_images) - 1
+                self.cur_region_label.configure(text=("Current region: " + str(self.current_region + 1)))
             self.update_image()
 
     def download_data(self):
