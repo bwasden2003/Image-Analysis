@@ -201,7 +201,7 @@ def detect_lines(image) -> list:
 
 
 
-def image_analysis(region, selected):
+def image_analysis(region, selected, range = 15):
 
     image_copy = np.copy(region)
     height, width, channels= image_copy.shape
@@ -215,8 +215,8 @@ def image_analysis(region, selected):
     start_index, end_index, area = analyze_peaks(profile)
     second_peak_data = None
     if start_index > 1 and end_index < len(profile) - 2:
-        prev_peak_data = profile[:start_index - 1]
-        next_peak_data = profile[end_index + 1:]
+        prev_peak_data = profile[:start_index - range] if start_index - range > 0 else profile[:start_index - 1]
+        next_peak_data = profile[end_index + range:] if end_index + range < len(profile) else profile[end_index + 1:]
         if len(prev_peak_data) > 1 and len(next_peak_data) > 1:
             next_peak_argmax = np.argmax(next_peak_data)
             prev_peak_argmax = np.argmax(prev_peak_data)
@@ -229,8 +229,8 @@ def image_analysis(region, selected):
             if len(second_peak_data) > 1:
                 second_start_index, second_end_index, second_area = analyze_peaks(second_peak_data)
                 if not prev:
-                    second_start_index += end_index + 1
-                    second_end_index += end_index + 1
+                    second_start_index += end_index + range
+                    second_end_index += end_index + range
                 if (second_start_index <= start_index and second_end_index > start_index) or (second_start_index <= end_index and second_end_index > end_index) or (second_start_index >= start_index and second_end_index <= end_index):
                     return [profile, [(start_index, end_index, area)]]
                 else:
@@ -238,7 +238,7 @@ def image_analysis(region, selected):
 
     return [profile, [(start_index, end_index, area)]]
 
-def inverse_image_analysis(region, selected):
+def inverse_image_analysis(region, selected, range = 1):
     image_copy = np.copy(region)
     height, width, channels= image_copy.shape
 
@@ -251,8 +251,8 @@ def inverse_image_analysis(region, selected):
     start_index, end_index, area = analyze_peaks(profile, inverse=True)
     second_peak_data = None
     if start_index > 1 and end_index < len(profile) - 2:
-        prev_peak_data = profile[:start_index - 1]
-        next_peak_data = profile[end_index + 1:]
+        prev_peak_data = profile[:start_index - range]
+        next_peak_data = profile[end_index + range:]
         if len(prev_peak_data) > 1 and len(next_peak_data) > 1:
             next_peak_argmin = np.argmin(next_peak_data)
             prev_peak_argmin = np.argmin(prev_peak_data)
@@ -331,16 +331,18 @@ class MyGUI:
         self.num_tests = 0
         self.selected_color = None
         self.gamma_level = 1
+        self.low_exposure = None
+        self.high_exposure = None
         self.invert = tk.BooleanVar()
 
-        open_frame = tk.Frame(self.root, borderwidth=2, relief=tk.SOLID)
+        open_frame = tk.Frame(self.root)
         open_frame.pack(side=tk.TOP, padx=10, pady=10)
 
         self.button_open = tk.Button(
             open_frame, text="Open Image", command=self.open_image)
         self.button_open.pack(anchor=tk.CENTER)
 
-        button_frame = tk.Frame(self.root, borderwidth=2, relief=tk.SOLID)
+        button_frame = tk.Frame(self.root)
         button_frame.pack(side=tk.TOP, padx=10, pady=10)
 
         self.button_previous = tk.Button(
@@ -353,6 +355,9 @@ class MyGUI:
 
         self.button_choose_gamma = tk.Button(button_frame, text="Adjust Gamma", command=self.adjust_gamma)
         self.button_choose_gamma.pack(side=tk.LEFT, padx=5)
+        
+        self.button_adjust_contrast = tk.Button(button_frame, text="Adjust Contrast", command=self.adjust_contrast)
+        self.button_adjust_contrast.pack(side=tk.LEFT, padx=5)
 
         self.button_choose_region = tk.Button(
             button_frame, text="Choose Region", command=self.choose_region)
@@ -373,7 +378,7 @@ class MyGUI:
         self.button_download.pack(side=tk.LEFT, padx=5)
         self.button_download.config(state=tk.DISABLED)
 
-        info_frame = tk.Frame(self.root, borderwidth=2, relief=tk.SOLID)
+        info_frame = tk.Frame(self.root)
         info_frame.pack(side=tk.LEFT, padx=10, pady=10, fill=tk.BOTH, expand=True)
 
         self.num_regions_label = tk.Label(info_frame, text=("Number of regions: " + str(self.num_tests)), width = 20)
@@ -391,7 +396,7 @@ class MyGUI:
         self.image_canvas = tk.Canvas(image_frame)
         self.image_canvas.pack(fill=tk.BOTH, expand=True)
 
-        self.plot_canvas = tk.Canvas(self.root, borderwidth=2, relief=tk.SOLID)
+        self.plot_canvas = tk.Canvas(self.root)
         self.plot_canvas.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
         self.output_results = tk.LabelFrame(self.plot_canvas)
@@ -474,7 +479,10 @@ class MyGUI:
                 cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
             if self.invert.get() == True:
                 image = sk.util.invert(image)
-            image = Image.fromarray(sk.exposure.adjust_gamma(image, self.gamma_level))
+            image = sk.exposure.adjust_gamma(image, self.gamma_level)
+            if self.low_exposure is not None or self.high_exposure is not None:
+                image = sk.exposure.rescale_intensity(image, in_range=(self.low_exposure, self.high_exposure))
+            image = Image.fromarray(image)
             image = self.resize_image(image)
             self.display_image(image)
 
@@ -634,6 +642,8 @@ class MyGUI:
                                1) % len(self.cropped_images)
         self.cur_region_label.configure(text=("Current region: " + str(self.current_region + 1)))
         self.selected_region = None
+        self.gamma_level = 1
+        self.low_exposure, self.high_exposure = None, None
         self.update_image()
 
     def show_next_region(self):
@@ -641,25 +651,42 @@ class MyGUI:
                                1) % len(self.cropped_images)
         self.cur_region_label.configure(text=("Current region: " + str(self.current_region + 1)))
         self.selected_region = None
+        self.gamma_level = 1
+        self.low_exposure, self.high_exposure = None, None
         self.update_image()
 
     def adjust_gamma(self):
-        result = None
         def save_result():
-            nonlocal result
             self.gamma_level = slider.get() / 100
-            print("gamma level is " + str(self.gamma_level))
             self.update_image()
             window.destroy()
         window = tk.Toplevel()
         window.title("Adjust Gamma")
         slider = tk.Scale(window, variable=tk.DoubleVar(), from_=0, to=200, orient=tk.HORIZONTAL, resolution=1)
-        slider.set(100)
+        slider.set(self.gamma_level * 100)
         button = tk.Button(window, text="Save", command=save_result)
         slider.pack(padx=20, pady=10)
         button.pack(pady=10)
         window.mainloop()
-        
+
+    def adjust_contrast(self):
+        def save_result():
+            self.low_exposure = scale_low.get()
+            self.high_exposure = scale_high.get()
+            self.update_image()
+            window.destroy()
+        window = tk.Toplevel()
+        window.title("Adjust Exposure")
+        scale_low = tk.Scale(window, variable=tk.DoubleVar(), from_=0, to=100, orient=tk.HORIZONTAL, label="Low Percentile", resolution=1)
+        scale_low.set(self.low_exposure) if self.low_exposure is not None else 0
+        scale_high = tk.Scale(window, variable=tk.DoubleVar(), from_=0, to=100, orient=tk.HORIZONTAL, label="High Percentile", resolution=1)
+        scale_high.set(self.high_exposure) if self.high_exposure is not None else 100
+        button = tk.Button(window, text="Save", command=save_result)
+        scale_low.pack(padx=20, pady=10)
+        scale_high.pack(padx=20, pady=10)
+        button.pack(pady=10)
+        window.mainloop()
+
     def choose_region(self):
         self.button_choose_region.config(state=tk.DISABLED)
         if self.original_image is not None:
@@ -733,7 +760,6 @@ class MyGUI:
                 else:
                     self.delete_temp_file('temp3.png')
 
-                print(f"Profile data saved to {file_path}")
 
     def close(self):
         self.root.destroy()
