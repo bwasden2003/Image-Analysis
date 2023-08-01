@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 import cv2
+import tifffile as tf
 
 import platform
 
@@ -25,13 +26,11 @@ min_maxr, min_maxc = 0, 0
 angle_threshold = 0
 file_path = ""
 
-# https://stackoverflow.com/questions/55636313/selecting-an-area-of-an-image-with-a-mouse-and-recording-the-dimensions-of-the-s
-
 
 def detect_lateral_flow_tests(image, line_length=10):
     if image.ndim == 2:
         # Increase gamma of the 2D grayscale image
-        image_gray = sk.color.rgb2gray(image)
+        image_gray = image
         image_copy = sk.exposure.adjust_gamma(image_gray, 0.4)
 
         # Create a binary mask based on color thresholding
@@ -204,13 +203,18 @@ def detect_lines(image) -> list:
 def image_analysis(region, selected, range = 15):
 
     image_copy = np.copy(region)
-    height, width, channels= image_copy.shape
+    if len(image_copy.shape) == 3:
+        height, width, channels = image_copy.shape
+        dim = (1, 2)
+    else:
+        height, width = image_copy.shape
+        dim = 1
 
     if not selected:
-        cropped_image = image_copy[int(height * .25):int(height * .6), int(width * .3):int(width * .7), :]
+        cropped_image = image_copy[int(height * .25):int(height * .6), int(width * .3):int(width * .7)]
     else:
         cropped_image = image_copy
-    profile = np.nanmean(cropped_image, axis=(1,2))
+    profile = np.nanmean(cropped_image, axis=dim)
 
     start_index, end_index, area = analyze_peaks(profile)
     second_peak_data = None
@@ -442,9 +446,10 @@ class MyGUI:
         global min_maxc, min_maxr
         global angle_threshold
         self.image_path = filedialog.askopenfilename(
-            filetypes=[("Image files", "*.jpg *.jpeg *.png")])
+            filetypes=[("Image files", "*.jpg *.jpeg *.png *.tif *.tiff")])
         if self.image_path:
-            image = cv2.imread(self.image_path)
+            extension = os.path.splitext(self.image_path)[1]
+            image = tf.imread(self.image_path) if extension in ['.tif', '.tiff'] else cv2.imread(self.image_path)
 
             self.original_image = image
             width = len(self.original_image[0])
@@ -473,6 +478,10 @@ class MyGUI:
     def update_image(self):
         if self.original_image is not None:
             region = self.cropped_images[self.current_region] if self.cropped_images else self.original_image
+            if region.dtype != 'uint8':
+                # Scale the values to 0-255 if they're not already
+                region = (region - region.min()) / (region.max() - region.min()) * 255.0
+                region = region.astype('uint8')
             image = np.copy(region)
             if self.selected_region is not None:
                 x, y, w, h = self.selected_region
@@ -522,6 +531,8 @@ class MyGUI:
                 region = self.cropped_images[self.current_region]
             
             region = sk.exposure.adjust_gamma(region, self.gamma_level)
+            if self.low_exposure is not None or self.high_exposure is not None:
+                region = sk.exposure.rescale_intensity(region, in_range=(self.low_exposure, self.high_exposure))
             if self.invert.get() == True:
                 region = sk.util.invert(region)
                 # Perform analysis function on the region
@@ -691,11 +702,15 @@ class MyGUI:
         self.button_choose_region.config(state=tk.DISABLED)
         if self.original_image is not None:
             cv2.namedWindow("Select Region", cv2.WINDOW_NORMAL)
+            
             if self.cropped_images is not None:
-                region = cv2.selectROI(
-                    "Select Region", self.cropped_images[self.current_region])
+                image = self.cropped_images[self.current_region]
             else:
-                region = cv2.selectROI(self.original_image)
+                image = self.original_image
+            if image.dtype != np.uint8:
+                image = (image - image.min()) / (image.max() - image.min()) * 255.0
+                image = image.astype(np.uint8)
+            region = cv2.selectROI("Select Region", image)
             self.selected_region = region if region != (0, 0, 0, 0) else None
             cv2.destroyWindow("Select Region")
             self.update_image()
