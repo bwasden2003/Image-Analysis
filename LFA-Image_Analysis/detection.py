@@ -20,6 +20,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import tkinter as tk
 from tkinter import filedialog
 from PIL import ImageTk, Image
+import xlsxwriter
 
 image_obj = None
 min_maxr, min_maxc = 0, 0
@@ -732,8 +733,10 @@ class MyGUI:
 
     def download_data(self):
         if self.analyzed_data is not None:
-            file_path = filedialog.asksaveasfilename(defaultextension='.xlsx')
+            file_path = filedialog.asksaveasfilename(filetypes=[('excel file', '*.xlsx')])
             if file_path:
+                if not file_path.lower().endswith('.xlsx'):
+                    file_path += '.xlsx'
                 data = pd.DataFrame(self.selected_profile,
                                     columns=["Intensity"])
                 writer = pd.ExcelWriter(file_path, engine='xlsxwriter')
