@@ -89,7 +89,6 @@ def detect_lateral_flow_tests(image, line_length=10):
     sorted_regions = sorted(lst, key=lambda region: (region[2], region[3]))
     for region in sorted_regions:
         minr, maxr, minc, maxc = region[0], region[1], region[2], region[3]
-        print(f"x1: {minc}, x2: {maxc}")
         lfa_image = image[minr:maxr, minc:maxc]
         lfa_images.append(lfa_image)
     return lfa_images
